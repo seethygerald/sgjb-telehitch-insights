@@ -27,6 +27,101 @@ def _base_env():
         "DATABRICKS_TOKEN": "token",
     }
 
+    assert config.session_string == "session"
+    assert config.channel == "ChannelTwo"
+
+def test_channel_discovery_scans_to_100_and_ignores_gaps_and_duplicates():
+    channels = telegram_scraper.telegram_channels_from_env(
+        {
+            "TELEGRAM_CHANNEL": "ChannelOne",
+            "TELEGRAM_CHANNEL_2": " ChannelTwo ",
+            "TELEGRAM_CHANNEL_4": "channelone",
+            "TELEGRAM_CHANNEL_100": "ChannelHundred",
+        }
+    )
+
+    assert channels == ("ChannelOne", "ChannelTwo", "ChannelHundred")
+
+
+def test_channel_discovery_uses_default_for_fresh_environment():
+    assert telegram_scraper.telegram_channels_from_env({}) == ("CarpoolSgJb",)
+
+
+def test_source_discovery_pairs_numbered_channel_with_topic_id():
+    sources = telegram_scraper.telegram_sources_from_env(
+        {
+            "TELEGRAM_CHANNEL": "CarpoolSgJb",
+            "TELEGRAM_CHANNEL_2": "TeleHitch",
+            "TELEGRAM_CHANNEL_2_TOPIC_ID": "1823745",
+        }
+    )
+
+    assert sources == (
+        telegram_scraper.TelegramSource("CarpoolSgJb"),
+        telegram_scraper.TelegramSource("TeleHitch", 1823745),
+    )
+    assert sources[1].state_key == "telehitch#topic=1823745"
+    assert sources[1].label == "TeleHitch (topic 1823745)"
+
+
+def test_source_discovery_distinguishes_topics_in_the_same_channel():
+    sources = telegram_scraper.telegram_sources_from_env(
+        {
+            "TELEGRAM_CHANNEL": "TeleHitch",
+            "TELEGRAM_CHANNEL_TOPIC_ID": "100",
+            "TELEGRAM_CHANNEL_2": "@telehitch",
+            "TELEGRAM_CHANNEL_2_TOPIC_ID": "200",
+        }
+    )
+
+    assert [source.state_key for source in sources] == [
+        "telehitch#topic=100",
+        "telehitch#topic=200",
+    ]
+
+
+def test_topic_id_requires_its_matching_channel():
+    with pytest.raises(
+        RuntimeError,
+        match="TELEGRAM_CHANNEL_2_TOPIC_ID requires TELEGRAM_CHANNEL_2",
+    ):
+        telegram_scraper.telegram_sources_from_env(
+            {"TELEGRAM_CHANNEL_2_TOPIC_ID": "1823745"}
+        )
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-1"])
+def test_topic_id_must_be_a_positive_integer(value):
+    with pytest.raises(RuntimeError, match="TELEGRAM_CHANNEL_2_TOPIC_ID"):
+        telegram_scraper.telegram_sources_from_env(
+            {
+                "TELEGRAM_CHANNEL_2": "TeleHitch",
+                "TELEGRAM_CHANNEL_2_TOPIC_ID": value,
+            }
+        )
+
+
+def test_config_reads_string_session_and_selected_channel():
+    with patch.dict("os.environ", _base_env(), clear=True):
+        config = telegram_scraper.TelegramConfig.from_env(channel="ChannelTwo")
+
+    assert config.session_string == "session"
+    assert config.channel == "ChannelTwo"
+
+
+def test_config_reads_first_source_topic_when_channel_is_not_explicit():
+    environment = _base_env() | {"TELEGRAM_CHANNEL_TOPIC_ID": "1823745"}
+    with patch.dict("os.environ", environment, clear=True):
+        config = telegram_scraper.TelegramConfig.from_env()
+
+    assert config.channel == "ChannelOne"
+    assert config.topic_id == 1823745
+
+
+def test_sender_handle_adds_at_prefix():
+    assert telegram_scraper._sender_handle(SimpleNamespace(username="gerald")) == "@gerald"
+    assert telegram_scraper._sender_handle(SimpleNamespace(username="@gerald")) == "@gerald"
+    assert telegram_scraper._sender_handle(SimpleNamespace(username=None)) is None
 
 def test_channel_discovery_scans_to_100_and_ignores_gaps_and_duplicates():
     channels = telegram_scraper.telegram_channels_from_env(
