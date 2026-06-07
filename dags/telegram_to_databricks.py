@@ -11,6 +11,8 @@ from airflow.decorators import dag, task
 from airflow.models import Variable
 
 from telegram_scraper import (
+    DEFAULT_BACKFILL_PAGE_LIMIT,
+    backfill_complete_after_run,
     message_limit_for_run,
     run_incremental_sync,
     telegram_sources_from_env,
@@ -73,8 +75,11 @@ def telegram_to_databricks_live_sync():
         sources = telegram_sources_from_env()
         state = _channel_state()
         per_run_limit = _int_env("TELEGRAM_PER_RUN_LIMIT", 0)
+        backfill_page_limit = _int_env(
+            "TELEGRAM_BACKFILL_PAGE_LIMIT", DEFAULT_BACKFILL_PAGE_LIMIT
+        )
         since_year = _int_env("TELEGRAM_SINCE_YEAR", 0) or None
-        channel_results: list[dict[str, int | str | None]] = []
+        channel_results: list[dict[str, int | str | bool | None]] = []
 
         for source in sources:
             saved = state.get(source.state_key, {})
@@ -84,6 +89,7 @@ def telegram_to_databricks_live_sync():
                 last_message_id=last_message_id,
                 initial_backfill_complete=backfill_complete,
                 per_run_limit=per_run_limit,
+                backfill_page_limit=backfill_page_limit,
             )
             LOGGER.info(
                 "Starting Telegram sync source=%s mode=%s min_id=%s limit=%s",
@@ -100,9 +106,14 @@ def telegram_to_databricks_live_sync():
                 since_year=since_year,
             )
             max_message_id = result.get("max_message_id")
+            next_message_id = max(last_message_id, int(max_message_id or 0))
+            source_backfill_complete = backfill_complete_after_run(
+                initial_backfill_complete=backfill_complete,
+                limit_reached=bool(result.get("limit_reached")),
+            )
             state[source.state_key] = {
-                "last_message_id": max(last_message_id, int(max_message_id or 0)),
-                "initial_backfill_complete": True,
+                "last_message_id": next_message_id,
+                "initial_backfill_complete": source_backfill_complete,
             }
             Variable.set(CHANNEL_STATE_VARIABLE, json.dumps(state, sort_keys=True))
             result["sync_mode"] = sync_mode

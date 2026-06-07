@@ -24,6 +24,7 @@ from telethon.sessions import StringSession
 DEFAULT_CHANNEL = "CarpoolSgJb"
 DEFAULT_TABLE = "telegram_messages"
 DEFAULT_BATCH_SIZE = 100
+DEFAULT_BACKFILL_PAGE_LIMIT = 1000
 DEFAULT_CSV_OUTPUT = "telegram_messages_incremental.csv"
 GMT_PLUS_8 = timezone(timedelta(hours=8), name="GMT+8")
 MAX_TELEGRAM_CHANNELS = 100
@@ -243,17 +244,37 @@ def _batched(
 
 
 def message_limit_for_run(
-    *, last_message_id: int, initial_backfill_complete: bool, per_run_limit: int
+    *,
+    last_message_id: int,
+    initial_backfill_complete: bool,
+    per_run_limit: int,
+    backfill_page_limit: int = DEFAULT_BACKFILL_PAGE_LIMIT,
 ) -> tuple[str, int | None]:
-    """Choose a full-history first run and incremental later runs."""
+    """Choose paged full-history backfills and incremental later runs.
+
+    New sources are backfilled in bounded pages so a very large Telegram history
+    does not have to fit in one Airflow worker attempt. The DAG keeps
+    ``initial_backfill_complete`` false until a page returns fewer messages than
+    ``backfill_page_limit``.
+    """
 
     if last_message_id < 0:
         raise ValueError("last_message_id must be zero or greater")
     if per_run_limit < 0:
         raise ValueError("TELEGRAM_PER_RUN_LIMIT must be zero or greater")
+    if backfill_page_limit <= 0:
+        raise ValueError("TELEGRAM_BACKFILL_PAGE_LIMIT must be greater than zero")
     if not initial_backfill_complete:
-        return "full_history", None
+        return "full_history", backfill_page_limit
     return "incremental", per_run_limit or None
+
+
+def backfill_complete_after_run(
+    *, initial_backfill_complete: bool, limit_reached: bool
+) -> bool:
+    """Keep unfinished sources in backfill mode while a full page was returned."""
+
+    return initial_backfill_complete or not limit_reached
 
 
 def _sender_handle(sender: object | None) -> str | None:
@@ -456,6 +477,7 @@ async def run_incremental_sync_async(
         "fetched": len(messages),
         "merged": inserted,
         "max_message_id": max((message.id for message in messages), default=None),
+        "limit_reached": bool(limit and len(messages) >= limit),
     }
 
 

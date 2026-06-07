@@ -123,6 +123,99 @@ def test_sender_handle_adds_at_prefix():
     assert telegram_scraper._sender_handle(SimpleNamespace(username="@gerald")) == "@gerald"
     assert telegram_scraper._sender_handle(SimpleNamespace(username=None)) is None
 
+def test_channel_discovery_scans_to_100_and_ignores_gaps_and_duplicates():
+    channels = telegram_scraper.telegram_channels_from_env(
+        {
+            "TELEGRAM_CHANNEL": "ChannelOne",
+            "TELEGRAM_CHANNEL_2": " ChannelTwo ",
+            "TELEGRAM_CHANNEL_4": "channelone",
+            "TELEGRAM_CHANNEL_100": "ChannelHundred",
+        }
+    )
+
+    assert channels == ("ChannelOne", "ChannelTwo", "ChannelHundred")
+
+
+def test_channel_discovery_uses_default_for_fresh_environment():
+    assert telegram_scraper.telegram_channels_from_env({}) == ("CarpoolSgJb",)
+
+
+def test_source_discovery_pairs_numbered_channel_with_topic_id():
+    sources = telegram_scraper.telegram_sources_from_env(
+        {
+            "TELEGRAM_CHANNEL": "CarpoolSgJb",
+            "TELEGRAM_CHANNEL_2": "TeleHitch",
+            "TELEGRAM_CHANNEL_2_TOPIC_ID": "1823745",
+        }
+    )
+
+    assert sources == (
+        telegram_scraper.TelegramSource("CarpoolSgJb"),
+        telegram_scraper.TelegramSource("TeleHitch", 1823745),
+    )
+    assert sources[1].state_key == "telehitch#topic=1823745"
+    assert sources[1].label == "TeleHitch (topic 1823745)"
+
+
+def test_source_discovery_distinguishes_topics_in_the_same_channel():
+    sources = telegram_scraper.telegram_sources_from_env(
+        {
+            "TELEGRAM_CHANNEL": "TeleHitch",
+            "TELEGRAM_CHANNEL_TOPIC_ID": "100",
+            "TELEGRAM_CHANNEL_2": "@telehitch",
+            "TELEGRAM_CHANNEL_2_TOPIC_ID": "200",
+        }
+    )
+
+    assert [source.state_key for source in sources] == [
+        "telehitch#topic=100",
+        "telehitch#topic=200",
+    ]
+
+
+def test_topic_id_requires_its_matching_channel():
+    with pytest.raises(
+        RuntimeError,
+        match="TELEGRAM_CHANNEL_2_TOPIC_ID requires TELEGRAM_CHANNEL_2",
+    ):
+        telegram_scraper.telegram_sources_from_env(
+            {"TELEGRAM_CHANNEL_2_TOPIC_ID": "1823745"}
+        )
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-1"])
+def test_topic_id_must_be_a_positive_integer(value):
+    with pytest.raises(RuntimeError, match="TELEGRAM_CHANNEL_2_TOPIC_ID"):
+        telegram_scraper.telegram_sources_from_env(
+            {
+                "TELEGRAM_CHANNEL_2": "TeleHitch",
+                "TELEGRAM_CHANNEL_2_TOPIC_ID": value,
+            }
+        )
+
+
+def test_config_reads_string_session_and_selected_channel():
+    with patch.dict("os.environ", _base_env(), clear=True):
+        config = telegram_scraper.TelegramConfig.from_env(channel="ChannelTwo")
+
+    assert config.session_string == "session"
+    assert config.channel == "ChannelTwo"
+
+
+def test_config_reads_first_source_topic_when_channel_is_not_explicit():
+    environment = _base_env() | {"TELEGRAM_CHANNEL_TOPIC_ID": "1823745"}
+    with patch.dict("os.environ", environment, clear=True):
+        config = telegram_scraper.TelegramConfig.from_env()
+
+    assert config.channel == "ChannelOne"
+    assert config.topic_id == 1823745
+
+
+def test_sender_handle_adds_at_prefix():
+    assert telegram_scraper._sender_handle(SimpleNamespace(username="gerald")) == "@gerald"
+    assert telegram_scraper._sender_handle(SimpleNamespace(username="@gerald")) == "@gerald"
+    assert telegram_scraper._sender_handle(SimpleNamespace(username=None)) is None
+
 
 def test_timestamp_is_converted_to_gmt_plus_8():
     converted = telegram_scraper._to_gmt_plus_8(
@@ -241,14 +334,46 @@ def test_merge_statement_uses_channel_key_handle_and_gmt8_columns():
     assert "`date`" not in statement
 
 
-def test_initial_run_always_loads_full_history_even_with_nonzero_stale_id():
+def test_initial_backfill_uses_default_page_limit_even_with_nonzero_stale_id():
     mode, limit = telegram_scraper.message_limit_for_run(
         last_message_id=123,
         initial_backfill_complete=False,
         per_run_limit=100,
     )
 
-    assert (mode, limit) == ("full_history", None)
+    assert (mode, limit) == ("full_history", telegram_scraper.DEFAULT_BACKFILL_PAGE_LIMIT)
+
+
+def test_initial_backfill_can_use_custom_page_limit():
+    mode, limit = telegram_scraper.message_limit_for_run(
+        last_message_id=123,
+        initial_backfill_complete=False,
+        per_run_limit=100,
+        backfill_page_limit=250,
+    )
+
+    assert (mode, limit) == ("full_history", 250)
+
+
+def test_full_backfill_page_remains_incomplete_when_limit_is_reached():
+    assert not telegram_scraper.backfill_complete_after_run(
+        initial_backfill_complete=False,
+        limit_reached=True,
+    )
+
+
+def test_short_backfill_page_marks_source_complete():
+    assert telegram_scraper.backfill_complete_after_run(
+        initial_backfill_complete=False,
+        limit_reached=False,
+    )
+
+
+def test_completed_source_stays_complete_when_incremental_limit_is_reached():
+    assert telegram_scraper.backfill_complete_after_run(
+        initial_backfill_complete=True,
+        limit_reached=True,
+    )
 
 
 def test_subsequent_run_uses_incremental_limit():
@@ -268,13 +393,20 @@ def test_subsequent_run_can_be_unlimited():
 
 
 @pytest.mark.parametrize(
-    ("last_message_id", "per_run_limit", "message"),
-    [(-1, 0, "last_message_id"), (0, -1, "TELEGRAM_PER_RUN_LIMIT")],
+    ("last_message_id", "per_run_limit", "backfill_page_limit", "message"),
+    [
+        (-1, 0, 1000, "last_message_id"),
+        (0, -1, 1000, "TELEGRAM_PER_RUN_LIMIT"),
+        (0, 0, 0, "TELEGRAM_BACKFILL_PAGE_LIMIT"),
+    ],
 )
-def test_message_limit_rejects_negative_values(last_message_id, per_run_limit, message):
+def test_message_limit_rejects_invalid_values(
+    last_message_id, per_run_limit, backfill_page_limit, message
+):
     with pytest.raises(ValueError, match=message):
         telegram_scraper.message_limit_for_run(
             last_message_id=last_message_id,
             initial_backfill_complete=False,
             per_run_limit=per_run_limit,
+            backfill_page_limit=backfill_page_limit,
         )

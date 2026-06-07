@@ -8,10 +8,11 @@ This version is intentionally designed for a **new deployment and an empty/nonex
 
 For every configured Telegram channel:
 
-1. The first successful DAG run loads all history available to the authenticated Telegram account.
-2. Airflow records that channel's highest Telegram message ID only after its Databricks merge succeeds.
-3. Later runs fetch only messages newer than that channel's saved checkpoint.
-4. Adding a new channel later causes a full-history load for that new channel without reloading the channels already tracked.
+1. New sources start in full-history mode and load the history available to the authenticated Telegram account in bounded pages.
+2. Airflow records each source's highest successfully merged Telegram message ID after every page.
+3. A source remains in full-history mode until a page returns fewer records than `TELEGRAM_BACKFILL_PAGE_LIMIT`; then it becomes incremental.
+4. Later incremental runs fetch only messages newer than that source's saved checkpoint.
+5. Adding a new channel later causes a paged full-history load for that new source without reloading the sources already tracked.
 
 The Delta `MERGE` key is `(channel, id)`, because Telegram message IDs are unique within a channel, not across every channel.
 
@@ -53,6 +54,7 @@ They must be siblings in Composer's `/dags` directory. Do not upload `.git`, `.v
 ```text
 TELEGRAM_AIRFLOW_SCHEDULE=*/15 * * * *
 TELEGRAM_CHANNEL=CarpoolSgJb
+TELEGRAM_BACKFILL_PAGE_LIMIT=1000
 TELEGRAM_PER_RUN_LIMIT=0
 DATABRICKS_SERVER_HOSTNAME=<hostname without https://>
 DATABRICKS_HTTP_PATH=<SQL warehouse HTTP path>
@@ -103,7 +105,9 @@ Internally, topic filtering uses Telegram's reply/thread history for the configu
 
 Use channel usernames/names that the StringSession account can access. Do not include secret values in these variables.
 
-`TELEGRAM_PER_RUN_LIMIT=0` means unlimited incremental messages. The first run for each channel is always unlimited so older history cannot be skipped.
+`TELEGRAM_BACKFILL_PAGE_LIMIT=1000` limits each unfinished full-history backfill page so a large channel does not need to fit into one Airflow worker attempt. The DAG saves progress after each successful page and keeps that source in full-history mode until the available history is exhausted. Increase it for fewer but heavier runs, or lower it for smaller worker memory usage.
+
+`TELEGRAM_PER_RUN_LIMIT=0` means unlimited incremental messages after a source has completed its initial backfill. It does not cap unfinished full-history pages; use `TELEGRAM_BACKFILL_PAGE_LIMIT` for that.
 
 Remove or leave unset `TELEGRAM_SINCE_YEAR` to load all available years. Setting it deliberately filters history by the GMT+8 message year.
 
@@ -141,7 +145,7 @@ A new deployment may leave it absent; the DAG treats that as `{}`. After success
 }
 ```
 
-Do not manually edit this state during normal operation. To restart completely, pause the DAG, drop the destination table, delete this Airflow Variable (or set it to `{}`), and trigger one run.
+Do not manually edit this state during normal operation. During a large source's initial backfill, you may see `initial_backfill_complete: false` with a nonzero `last_message_id`; that means the DAG has successfully merged part of the history and will continue from that ID on the next run or retry. To restart completely, pause the DAG, drop the destination table, delete this Airflow Variable (or set it to `{}`), and trigger one run.
 
 The older variables `telegram_scraper_last_message_id` and `telegram_scraper_initial_backfill_complete` are not used by this clean-deployment version.
 
