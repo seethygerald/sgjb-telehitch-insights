@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -28,8 +29,8 @@ from telethon.sessions import StringSession
 DEFAULT_CHANNEL = "CarpoolSgJb"
 DEFAULT_TABLE = "telegram_messages"
 DEFAULT_BATCH_SIZE = 100
-DEFAULT_INITIAL_LOOKBACK_MESSAGES = 1_000
 DEFAULT_CSV_OUTPUT = "telegram_sgtelehitch-incremental.csv"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,30 @@ def _batched(items: Sequence[TelegramMessage], batch_size: int) -> Iterable[Sequ
         yield items[start : start + batch_size]
 
 
+def message_limit_for_run(
+    *,
+    last_message_id: int,
+    initial_backfill_complete: bool,
+    per_run_limit: int,
+) -> tuple[str, int | None]:
+    """Choose full-history or incremental extraction without skipping old messages.
+
+    The initial run must be unlimited. Applying a positive per-run limit to that run
+    and then advancing the checkpoint would permanently skip older Telegram messages.
+    Once the initial backfill succeeds, ``per_run_limit`` may cap later incremental
+    runs; zero means unlimited.
+    """
+
+    if last_message_id < 0:
+        raise ValueError("last_message_id must be zero or greater")
+    if per_run_limit < 0:
+        raise ValueError("TELEGRAM_PER_RUN_LIMIT must be zero or greater")
+
+    if not initial_backfill_complete and last_message_id == 0:
+        return "full_history", None
+    return "incremental", per_run_limit or None
+
+
 async def fetch_new_messages(
     config: TelegramConfig,
     *,
@@ -177,7 +202,22 @@ async def fetch_new_messages(
     return messages
 
 
-def ensure_table(cursor, table_name: str) -> None:
+def _table_columns(cursor, table_name: str) -> set[str]:
+    """Return normalized column names from a Databricks DESCRIBE TABLE result."""
+
+    cursor.execute(f"DESCRIBE TABLE {table_name}")
+    columns: set[str] = set()
+    for row in cursor.fetchall():
+        column_name = str(row[0]).strip()
+        if not column_name or column_name.startswith("#"):
+            continue
+        columns.add(column_name.lower())
+    return columns
+
+
+def ensure_table(cursor, table_name: str, channel: str) -> bool:
+    """Create the destination table or migrate the legacy three-column schema."""
+
     cursor.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
@@ -192,6 +232,85 @@ def ensure_table(cursor, table_name: str) -> None:
         """
     )
 
+    columns = _table_columns(cursor, table_name)
+    missing_base_columns = {"id", "message"} - columns
+    if missing_base_columns:
+        missing = ", ".join(sorted(missing_base_columns))
+        raise RuntimeError(
+            f"Databricks table {table_name} is missing required columns: {missing}. "
+            "Use a different DATABRICKS_TABLE or repair the table schema before retrying."
+        )
+    if "date" not in columns and "message_date" not in columns:
+        raise RuntimeError(
+            f"Databricks table {table_name} has neither date nor message_date. "
+            "Use a different DATABRICKS_TABLE or repair the table schema before retrying."
+        )
+
+    migration_columns = {
+        "channel": "STRING",
+        "message_date": "TIMESTAMP",
+        "sender_id": "BIGINT",
+        "scraped_at": "TIMESTAMP",
+    }
+    missing_migration_columns = [name for name in migration_columns if name not in columns]
+    if missing_migration_columns:
+        LOGGER.info(
+            "Migrating legacy Databricks table %s; adding columns: %s",
+            table_name,
+            ", ".join(missing_migration_columns),
+        )
+        additions = ", ".join(
+            f"{_quote_identifier(name)} {migration_columns[name]}"
+            for name in missing_migration_columns
+        )
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMNS ({additions})")
+
+    # The legacy ``date`` column is also a retry-safe migration marker. These
+    # statements deliberately fill only NULL values, so a retry can finish a
+    # migration that previously stopped after ALTER TABLE without overwriting data.
+    if "date" in columns:
+        cursor.execute(
+            f"UPDATE {table_name} "
+            f"SET channel = {_sql_literal(channel)} WHERE channel IS NULL"
+        )
+        cursor.execute(
+            f"UPDATE {table_name} "
+            "SET message_date = `date` WHERE message_date IS NULL"
+        )
+        cursor.execute(
+            f"UPDATE {table_name} "
+            "SET scraped_at = COALESCE(message_date, current_timestamp()) "
+            "WHERE scraped_at IS NULL"
+        )
+
+    return "date" in columns
+
+
+def _merge_statement(table_name: str, values_sql: str, include_legacy_date: bool) -> str:
+    legacy_update = ",\n                        `date` = source.message_date" if include_legacy_date else ""
+    legacy_insert_column = ", `date`" if include_legacy_date else ""
+    legacy_insert_value = ", source.message_date" if include_legacy_date else ""
+    return f"""
+        MERGE INTO {table_name} AS target
+        USING (
+            SELECT * FROM VALUES
+            {values_sql}
+            AS source(channel, id, message_date, message, sender_id, scraped_at)
+        ) AS source
+        ON target.channel = source.channel AND target.id = source.id
+        WHEN MATCHED THEN UPDATE SET
+            message_date = source.message_date,
+            message = source.message,
+            sender_id = source.sender_id,
+            scraped_at = source.scraped_at{legacy_update}
+        WHEN NOT MATCHED THEN INSERT (
+            channel, id, message_date, message, sender_id, scraped_at{legacy_insert_column}
+        ) VALUES (
+            source.channel, source.id, source.message_date, source.message,
+            source.sender_id, source.scraped_at{legacy_insert_value}
+        )
+    """
+
 
 def merge_messages(config: DatabricksConfig, messages: Sequence[TelegramMessage]) -> int:
     """Idempotently merge Telegram messages into the configured Databricks table."""
@@ -205,7 +324,9 @@ def merge_messages(config: DatabricksConfig, messages: Sequence[TelegramMessage]
         access_token=config.access_token,
     ) as connection:
         with connection.cursor() as cursor:
-            ensure_table(cursor, config.table_name)
+            include_legacy_date = ensure_table(
+                cursor, config.table_name, messages[0].channel
+            )
 
             for batch in _batched(messages, config.batch_size):
                 values_sql = ",\n".join(
@@ -222,26 +343,11 @@ def merge_messages(config: DatabricksConfig, messages: Sequence[TelegramMessage]
                     for message in batch
                 )
                 cursor.execute(
-                    f"""
-                    MERGE INTO {config.table_name} AS target
-                    USING (
-                        SELECT * FROM VALUES
-                        {values_sql}
-                        AS source(channel, id, message_date, message, sender_id, scraped_at)
-                    ) AS source
-                    ON target.channel = source.channel AND target.id = source.id
-                    WHEN MATCHED THEN UPDATE SET
-                        message_date = source.message_date,
-                        message = source.message,
-                        sender_id = source.sender_id,
-                        scraped_at = source.scraped_at
-                    WHEN NOT MATCHED THEN INSERT (
-                        channel, id, message_date, message, sender_id, scraped_at
-                    ) VALUES (
-                        source.channel, source.id, source.message_date, source.message,
-                        source.sender_id, source.scraped_at
+                    _merge_statement(
+                        config.table_name,
+                        values_sql,
+                        include_legacy_date=include_legacy_date,
                     )
-                    """
                 )
 
     return len(messages)
