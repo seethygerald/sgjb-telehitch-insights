@@ -1,0 +1,14 @@
+# Telegram authentication sessions are credentials and must never be committed.
+*.session
+*.session-journal
+
+# Local exports and environment secrets.
+*.csv
+.env
+.env.*
+
+# Python tooling.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
