@@ -1,0 +1,2 @@
+databricks-sql-connector>=3.0
+telethon>=1.34
