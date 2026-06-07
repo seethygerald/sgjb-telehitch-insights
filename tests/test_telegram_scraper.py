@@ -27,6 +27,8 @@ def _base_env():
         "DATABRICKS_TOKEN": "token",
     }
 
+    assert config.session_string == "session"
+    assert config.channel == "ChannelTwo"
 
 def test_channel_discovery_scans_to_100_and_ignores_gaps_and_duplicates():
     channels = telegram_scraper.telegram_channels_from_env(
