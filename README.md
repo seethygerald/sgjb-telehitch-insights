@@ -22,6 +22,7 @@ The pipeline creates this clean schema automatically:
 | Column | Type | Meaning |
 |---|---|---|
 | `channel` | `STRING` | Configured Telegram channel name/handle |
+| `topic_id` | `BIGINT` | Optional Telegram forum topic/thread root message ID |
 | `id` | `BIGINT` | Telegram message ID within the channel |
 | `message_date_gmt8` | `TIMESTAMP_NTZ` | Telegram message time converted to fixed GMT+8 wall-clock time |
 | `message` | `STRING` | Message text |
@@ -72,7 +73,33 @@ TELEGRAM_CHANNEL_3=ThirdChannel
 TELEGRAM_CHANNEL_100=HundredthChannel
 ```
 
-The code scans every numbered variable from `_2` through `_100`. Numbering may contain gaps; for example, `_2` and `_5` are both discovered. Empty values are ignored, and duplicate names are removed case-insensitively.
+The code scans every numbered variable from `_2` through `_100`. Numbering may contain gaps; for example, `_2` and `_5` are both discovered. Empty values are ignored. Exact duplicate channel/topic pairs are removed case-insensitively.
+
+### Optional forum topic/thread filtering
+
+A Telegram link such as:
+
+```text
+https://t.me/TeleHitch/1823745
+```
+
+identifies channel or supergroup `TeleHitch` and message/topic ID `1823745`. To ingest only the replies/messages in that forum topic, configure the channel and its matching topic variable:
+
+```text
+TELEGRAM_CHANNEL_2=TeleHitch
+TELEGRAM_CHANNEL_2_TOPIC_ID=1823745
+```
+
+The suffixes must match. For example, `TELEGRAM_CHANNEL_5_TOPIC_ID` belongs to `TELEGRAM_CHANNEL_5`. A topic ID without its matching channel causes a configuration error. Topic IDs must be positive integers.
+
+The first channel can also be topic-filtered with:
+
+```text
+TELEGRAM_CHANNEL=TeleHitch
+TELEGRAM_CHANNEL_TOPIC_ID=1823745
+```
+
+Internally, topic filtering uses Telegram's reply/thread history for the configured root message ID. It is intended for Telegram forum topics or supported discussion threads. An ordinary message permalink is not automatically a separate channel; if the ID does not represent a supported thread, Telegram may return no replies or reject the request.
 
 Use channel usernames/names that the StringSession account can access. Do not include secret values in these variables.
 
@@ -103,11 +130,11 @@ A new deployment may leave it absent; the DAG treats that as `{}`. After success
 
 ```json
 {
-  "CarpoolSgJb": {
+  "carpoolsgjb": {
     "initial_backfill_complete": true,
     "last_message_id": 12345
   },
-  "SecondChannel": {
+  "telehitch#topic=1823745": {
     "initial_backfill_complete": true,
     "last_message_id": 67890
   }
@@ -134,6 +161,12 @@ After installing dependencies and setting required environment variables:
 
 ```bash
 python dags/telegram_scraper.py --channel CarpoolSgJb --no-csv-output
+
+# One forum topic/thread:
+python dags/telegram_scraper.py \
+  --channel TeleHitch \
+  --topic-id 1823745 \
+  --no-csv-output
 ```
 
 Manual execution processes one channel and does not maintain Airflow's per-channel checkpoint state. The Airflow DAG is the intended automated entry point.

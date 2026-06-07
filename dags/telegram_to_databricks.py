@@ -13,7 +13,7 @@ from airflow.models import Variable
 from telegram_scraper import (
     message_limit_for_run,
     run_incremental_sync,
-    telegram_channels_from_env,
+    telegram_sources_from_env,
 )
 
 DAG_ID = "telegram_to_databricks_live_sync"
@@ -30,16 +30,6 @@ SECRET_VARIABLES = {
 def _int_env(name: str, default: int) -> int:
     value = os.getenv(name)
     return int(value) if value else default
-
-
-def _bool_variable(name: str, default: bool = False) -> bool:
-    value = Variable.get(name, default_var=str(default).lower())
-    normalized = str(value).strip().lower()
-    if normalized in {"true", "1", "yes", "y"}:
-        return True
-    if normalized in {"false", "0", "no", "n"}:
-        return False
-    raise ValueError(f"Airflow Variable {name} must be true or false, got {value!r}")
 
 
 def _load_secret_environment() -> None:
@@ -80,14 +70,14 @@ def telegram_to_databricks_live_sync():
     @task
     def sync_messages() -> dict[str, object]:
         _load_secret_environment()
-        channels = telegram_channels_from_env()
+        sources = telegram_sources_from_env()
         state = _channel_state()
         per_run_limit = _int_env("TELEGRAM_PER_RUN_LIMIT", 0)
         since_year = _int_env("TELEGRAM_SINCE_YEAR", 0) or None
         channel_results: list[dict[str, int | str | None]] = []
 
-        for channel in channels:
-            saved = state.get(channel, {})
+        for source in sources:
+            saved = state.get(source.state_key, {})
             last_message_id = int(saved.get("last_message_id", 0))
             backfill_complete = bool(saved.get("initial_backfill_complete", False))
             sync_mode, limit = message_limit_for_run(
@@ -96,20 +86,21 @@ def telegram_to_databricks_live_sync():
                 per_run_limit=per_run_limit,
             )
             LOGGER.info(
-                "Starting Telegram sync channel=%s mode=%s min_id=%s limit=%s",
-                channel,
+                "Starting Telegram sync source=%s mode=%s min_id=%s limit=%s",
+                source.label,
                 sync_mode,
                 last_message_id,
                 "unlimited" if limit is None else limit,
             )
             result = run_incremental_sync(
-                channel=channel,
+                channel=source.channel,
+                topic_id=source.topic_id,
                 min_id=last_message_id,
                 limit=limit,
                 since_year=since_year,
             )
             max_message_id = result.get("max_message_id")
-            state[channel] = {
+            state[source.state_key] = {
                 "last_message_id": max(last_message_id, int(max_message_id or 0)),
                 "initial_backfill_complete": True,
             }

@@ -27,6 +27,8 @@ def _base_env():
         "DATABRICKS_TOKEN": "token",
     }
 
+    assert config.session_string == "session"
+    assert config.channel == "ChannelTwo"
 
 def test_channel_discovery_scans_to_100_and_ignores_gaps_and_duplicates():
     channels = telegram_scraper.telegram_channels_from_env(
@@ -45,12 +47,75 @@ def test_channel_discovery_uses_default_for_fresh_environment():
     assert telegram_scraper.telegram_channels_from_env({}) == ("CarpoolSgJb",)
 
 
+def test_source_discovery_pairs_numbered_channel_with_topic_id():
+    sources = telegram_scraper.telegram_sources_from_env(
+        {
+            "TELEGRAM_CHANNEL": "CarpoolSgJb",
+            "TELEGRAM_CHANNEL_2": "TeleHitch",
+            "TELEGRAM_CHANNEL_2_TOPIC_ID": "1823745",
+        }
+    )
+
+    assert sources == (
+        telegram_scraper.TelegramSource("CarpoolSgJb"),
+        telegram_scraper.TelegramSource("TeleHitch", 1823745),
+    )
+    assert sources[1].state_key == "telehitch#topic=1823745"
+    assert sources[1].label == "TeleHitch (topic 1823745)"
+
+
+def test_source_discovery_distinguishes_topics_in_the_same_channel():
+    sources = telegram_scraper.telegram_sources_from_env(
+        {
+            "TELEGRAM_CHANNEL": "TeleHitch",
+            "TELEGRAM_CHANNEL_TOPIC_ID": "100",
+            "TELEGRAM_CHANNEL_2": "@telehitch",
+            "TELEGRAM_CHANNEL_2_TOPIC_ID": "200",
+        }
+    )
+
+    assert [source.state_key for source in sources] == [
+        "telehitch#topic=100",
+        "telehitch#topic=200",
+    ]
+
+
+def test_topic_id_requires_its_matching_channel():
+    with pytest.raises(
+        RuntimeError,
+        match="TELEGRAM_CHANNEL_2_TOPIC_ID requires TELEGRAM_CHANNEL_2",
+    ):
+        telegram_scraper.telegram_sources_from_env(
+            {"TELEGRAM_CHANNEL_2_TOPIC_ID": "1823745"}
+        )
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-1"])
+def test_topic_id_must_be_a_positive_integer(value):
+    with pytest.raises(RuntimeError, match="TELEGRAM_CHANNEL_2_TOPIC_ID"):
+        telegram_scraper.telegram_sources_from_env(
+            {
+                "TELEGRAM_CHANNEL_2": "TeleHitch",
+                "TELEGRAM_CHANNEL_2_TOPIC_ID": value,
+            }
+        )
+
+
 def test_config_reads_string_session_and_selected_channel():
     with patch.dict("os.environ", _base_env(), clear=True):
         config = telegram_scraper.TelegramConfig.from_env(channel="ChannelTwo")
 
     assert config.session_string == "session"
     assert config.channel == "ChannelTwo"
+
+
+def test_config_reads_first_source_topic_when_channel_is_not_explicit():
+    environment = _base_env() | {"TELEGRAM_CHANNEL_TOPIC_ID": "1823745"}
+    with patch.dict("os.environ", environment, clear=True):
+        config = telegram_scraper.TelegramConfig.from_env()
+
+    assert config.channel == "ChannelOne"
+    assert config.topic_id == 1823745
 
 
 def test_sender_handle_adds_at_prefix():
@@ -83,11 +148,17 @@ def test_fetch_uses_string_session_gets_sender_and_disconnects():
     client.disconnect = AsyncMock()
     client.is_user_authorized = AsyncMock(return_value=True)
 
+    iter_arguments = {}
+
     async def iter_messages(*args, **kwargs):
+        iter_arguments["args"] = args
+        iter_arguments["kwargs"] = kwargs
         yield message
 
     client.iter_messages = iter_messages
-    config = telegram_scraper.TelegramConfig(1, "hash", "name", "secret", "ChannelOne")
+    config = telegram_scraper.TelegramConfig(
+        1, "hash", "name", "secret", "ChannelOne", 1823745
+    )
 
     with (
         patch.object(telegram_scraper, "StringSession", return_value="string-session") as session,
@@ -98,6 +169,9 @@ def test_fetch_uses_string_session_gets_sender_and_disconnects():
     session.assert_called_once_with("secret")
     telegram_client.assert_called_once_with("string-session", 1, "hash")
     client.disconnect.assert_awaited_once()
+    assert iter_arguments["args"] == ("ChannelOne",)
+    assert iter_arguments["kwargs"]["reply_to"] == 1823745
+    assert messages[0].topic_id == 1823745
     assert messages[0].sender_handle == "@gerald"
     assert messages[0].message_date_gmt8.isoformat() == "2026-06-07T18:30:00+08:00"
 
@@ -127,6 +201,7 @@ def test_ensure_table_creates_clean_schema():
     telegram_scraper.ensure_table(cursor, "`workspace`.`default`.`messages`")
 
     create = " ".join(cursor.execute.call_args_list[0].args[0].split())
+    assert "topic_id BIGINT" in create
     assert "sender_handle STRING" in create
     assert "message_date_gmt8 TIMESTAMP_NTZ" in create
     assert "scraped_at_gmt8 TIMESTAMP_NTZ" in create
@@ -152,12 +227,14 @@ def test_merge_statement_uses_channel_key_handle_and_gmt8_columns():
     statement = " ".join(
         telegram_scraper._merge_statement(
             "`workspace`.`default`.`messages`",
-            "('channel', 1, TIMESTAMP_NTZ '2026-06-07 18:00:00', 'hello', 2, '@user', "
+            "('channel', 1823745, 1, TIMESTAMP_NTZ '2026-06-07 18:00:00', "
+            "'hello', 2, '@user', "
             "TIMESTAMP_NTZ '2026-06-07 18:01:00')",
         ).split()
     )
 
     assert "target.channel = source.channel AND target.id = source.id" in statement
+    assert "topic_id = COALESCE(source.topic_id, target.topic_id)" in statement
     assert "sender_handle = source.sender_handle" in statement
     assert "message_date_gmt8" in statement
     assert "scraped_at_gmt8" in statement
