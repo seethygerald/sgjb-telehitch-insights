@@ -1,20 +1,43 @@
 # SGJB Telehitch Insights
 
-This repository contains a Google Cloud Composer / Apache Airflow pipeline that loads Telegram channel messages into a Databricks Delta table.
+This repository contains a Google Cloud Composer / Apache Airflow pipeline that loads messages from one or more Telegram channels into a Databricks Delta table.
 
-## Runtime behavior
+## Clean-deployment behavior
 
-The pipeline is designed for a brand-new deployment:
+This version is intentionally designed for a **new deployment and an empty/nonexistent Databricks table**. It does not migrate an older schema.
 
-1. The first successful DAG run loads the full Telegram history available to the authenticated Telegram account.
-2. After Databricks merging succeeds, Airflow stores the highest Telegram message ID and marks the initial backfill complete.
-3. Later runs fetch only messages newer than the stored checkpoint.
+For every configured Telegram channel:
 
-This means an interviewer or new user can deploy the repository without preloading any data. A clean Airflow environment with no checkpoint variables starts in full-history mode automatically.
+1. The first successful DAG run loads all history available to the authenticated Telegram account.
+2. Airflow records that channel's highest Telegram message ID only after its Databricks merge succeeds.
+3. Later runs fetch only messages newer than that channel's saved checkpoint.
+4. Adding a new channel later causes a full-history load for that new channel without reloading the channels already tracked.
+
+The Delta `MERGE` key is `(channel, id)`, because Telegram message IDs are unique within a channel, not across every channel.
+
+## Databricks table schema
+
+The pipeline creates this clean schema automatically:
+
+| Column | Type | Meaning |
+|---|---|---|
+| `channel` | `STRING` | Configured Telegram channel name/handle |
+| `id` | `BIGINT` | Telegram message ID within the channel |
+| `message_date_gmt8` | `TIMESTAMP_NTZ` | Telegram message time converted to fixed GMT+8 wall-clock time |
+| `message` | `STRING` | Message text |
+| `sender_id` | `BIGINT` | Telegram sender ID, when available |
+| `sender_handle` | `STRING` | Sender username in `@username` form, when Telegram exposes one |
+| `scraped_at_gmt8` | `TIMESTAMP_NTZ` | Extraction time in fixed GMT+8 wall-clock time |
+
+`sender_handle` can be `NULL`. Telegram users can have no public username, and some channel/anonymous posts do not expose a sender username.
+
+`TIMESTAMP_NTZ` is deliberate: it stores the displayed GMT+8 wall-clock value without Databricks changing it according to a SQL session time zone.
+
+If a table already exists under `DATABRICKS_TABLE` with a different schema, the DAG stops with an explicit error. Drop that table or select a new table name before the first run.
 
 ## Deployable Composer layout
 
-Upload the contents of `dags/` to the Cloud Composer DAGs folder:
+Upload both files in `dags/` directly to the Cloud Composer DAGs folder:
 
 ```text
 dags/
@@ -22,29 +45,44 @@ dags/
   telegram_scraper.py
 ```
 
-Both files must be next to each other in Composer's `/dags` directory because `telegram_to_databricks.py` imports `telegram_scraper.py` as a sibling module.
-
-Do not upload `.git`, `.venv`, CSV files, `.session` files, `.env` files, or local notes containing secrets.
+They must be siblings in Composer's `/dags` directory. Do not upload `.git`, `.venv`, CSV files, `.session` files, `.env` files, tests, or secret notes.
 
 ## Required Composer environment variables
-
-Non-secret values:
 
 ```text
 TELEGRAM_AIRFLOW_SCHEDULE=*/15 * * * *
 TELEGRAM_CHANNEL=CarpoolSgJb
 TELEGRAM_PER_RUN_LIMIT=0
-DATABRICKS_SERVER_HOSTNAME=<Databricks server hostname without https://>
+DATABRICKS_SERVER_HOSTNAME=<hostname without https://>
 DATABRICKS_HTTP_PATH=<SQL warehouse HTTP path>
-DATABRICKS_CATALOG=<catalog, for example workspace>
-DATABRICKS_SCHEMA=<schema, for example default>
+DATABRICKS_CATALOG=<for example workspace>
+DATABRICKS_SCHEMA=<for example default>
 DATABRICKS_TABLE=telegram_messages
 DATABRICKS_BATCH_SIZE=100
 ```
 
-`TELEGRAM_PER_RUN_LIMIT=0` means unlimited incremental messages after the initial full-history backfill. Do not set an initial lookback variable; the first run is intentionally unlimited.
+### Multiple Telegram channels
 
-Secrets should be provided through Airflow Variables backed by Google Secret Manager:
+`TELEGRAM_CHANNEL` is the first channel. Add any additional channels with numbered variables:
+
+```text
+TELEGRAM_CHANNEL_2=SecondChannel
+TELEGRAM_CHANNEL_3=ThirdChannel
+...
+TELEGRAM_CHANNEL_100=HundredthChannel
+```
+
+The code scans every numbered variable from `_2` through `_100`. Numbering may contain gaps; for example, `_2` and `_5` are both discovered. Empty values are ignored, and duplicate names are removed case-insensitively.
+
+Use channel usernames/names that the StringSession account can access. Do not include secret values in these variables.
+
+`TELEGRAM_PER_RUN_LIMIT=0` means unlimited incremental messages. The first run for each channel is always unlimited so older history cannot be skipped.
+
+Remove or leave unset `TELEGRAM_SINCE_YEAR` to load all available years. Setting it deliberately filters history by the GMT+8 message year.
+
+## Secrets
+
+Provide these through Airflow Variables backed by Google Secret Manager:
 
 ```text
 airflow-variables-telegram_api_id
@@ -53,38 +91,52 @@ airflow-variables-telegram_session_string
 airflow-variables-databricks_token
 ```
 
-## Airflow state variables
+## Airflow state
 
-For a fresh deployment, these variables may be absent. The DAG defaults to:
+The DAG uses one JSON Airflow Variable:
 
 ```text
-telegram_scraper_last_message_id=0
-telegram_scraper_initial_backfill_complete=false
+telegram_scraper_channel_state
 ```
 
-To deliberately rerun the full-history backfill, pause the DAG, set those two values back to `0` and `false`, then trigger one run.
+A new deployment may leave it absent; the DAG treats that as `{}`. After successful runs it resembles:
 
-## Local helper for Telegram StringSession
+```json
+{
+  "CarpoolSgJb": {
+    "initial_backfill_complete": true,
+    "last_message_id": 12345
+  },
+  "SecondChannel": {
+    "initial_backfill_complete": true,
+    "last_message_id": 67890
+  }
+}
+```
 
-On macOS, run:
+Do not manually edit this state during normal operation. To restart completely, pause the DAG, drop the destination table, delete this Airflow Variable (or set it to `{}`), and trigger one run.
+
+The older variables `telegram_scraper_last_message_id` and `telegram_scraper_initial_backfill_complete` are not used by this clean-deployment version.
+
+## Local Telegram StringSession helper
+
+On macOS:
 
 ```bash
 ./scripts/setup_telegram_session_macos.sh
 ```
 
-The helper creates `.venv`, installs Telethon, and runs `scripts/generate_telegram_string_session.py`. Never commit or share the generated StringSession.
+Never commit or share the generated StringSession.
 
-## Manual local scraper execution
+## Manual diagnostics
 
-After installing `requirements.txt` and setting all required environment variables, run:
+After installing dependencies and setting required environment variables:
 
 ```bash
-python dags/telegram_scraper.py --no-csv-output
+python dags/telegram_scraper.py --channel CarpoolSgJb --no-csv-output
 ```
 
-Manual runs can write an audit CSV by omitting `--no-csv-output`; CSV files are ignored by Git.
-
-The manual command is intended for diagnostics and does not maintain the Airflow checkpoint. The automatic first-run/full-history and later-run/incremental lifecycle is managed by `telegram_to_databricks_live_sync` in Airflow.
+Manual execution processes one channel and does not maintain Airflow's per-channel checkpoint state. The Airflow DAG is the intended automated entry point.
 
 ## Tests
 

@@ -1,12 +1,8 @@
-"""Incrementally mirror Telegram channel messages into Databricks SQL.
+"""Mirror one or more Telegram channels into a clean Databricks Delta table.
 
-The module can be used in two ways:
-
-* Directly from the command line for local/manual syncs.
-* From the Airflow DAG in ``dags/telegram_to_databricks.py`` for continuous loads.
-
-All credentials are read from environment variables so secrets are not committed to
-source control.
+The first successful Airflow run for each configured channel loads all history
+available to the authenticated Telegram account. Later runs use a per-channel
+message-ID checkpoint and load only newer messages.
 """
 
 from __future__ import annotations
@@ -16,21 +12,31 @@ import asyncio
 import csv
 import logging
 import os
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from databricks import sql
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-
 DEFAULT_CHANNEL = "CarpoolSgJb"
 DEFAULT_TABLE = "telegram_messages"
 DEFAULT_BATCH_SIZE = 100
-DEFAULT_CSV_OUTPUT = "telegram_sgtelehitch-incremental.csv"
+DEFAULT_CSV_OUTPUT = "telegram_messages_incremental.csv"
+GMT_PLUS_8 = timezone(timedelta(hours=8), name="GMT+8")
+MAX_TELEGRAM_CHANNELS = 100
 LOGGER = logging.getLogger(__name__)
+EXPECTED_TABLE_COLUMNS = {
+    "channel",
+    "id",
+    "message_date_gmt8",
+    "message",
+    "sender_id",
+    "sender_handle",
+    "scraped_at_gmt8",
+}
 
 
 @dataclass(frozen=True)
@@ -39,15 +45,16 @@ class TelegramMessage:
 
     id: int
     channel: str
-    date: datetime
+    message_date_gmt8: datetime
     message: str | None
     sender_id: int | None
-    scraped_at: datetime
+    sender_handle: str | None
+    scraped_at_gmt8: datetime
 
 
 @dataclass(frozen=True)
 class TelegramConfig:
-    """Configuration for Telegram access and incremental extraction."""
+    """Configuration for Telegram access and one channel extraction."""
 
     api_id: int
     api_hash: str
@@ -56,13 +63,13 @@ class TelegramConfig:
     channel: str = DEFAULT_CHANNEL
 
     @classmethod
-    def from_env(cls) -> "TelegramConfig":
+    def from_env(cls, *, channel: str | None = None) -> "TelegramConfig":
         return cls(
             api_id=_required_int_env("TELEGRAM_API_ID"),
             api_hash=_required_env("TELEGRAM_API_HASH"),
             session_name=os.getenv("TELEGRAM_SESSION_NAME", "session_name"),
             session_string=os.getenv("TELEGRAM_SESSION_STRING"),
-            channel=os.getenv("TELEGRAM_CHANNEL", DEFAULT_CHANNEL),
+            channel=channel or telegram_channels_from_env()[0],
         )
 
 
@@ -85,6 +92,9 @@ class DatabricksConfig:
 
     @classmethod
     def from_env(cls) -> "DatabricksConfig":
+        batch_size = int(os.getenv("DATABRICKS_BATCH_SIZE", str(DEFAULT_BATCH_SIZE)))
+        if batch_size <= 0:
+            raise RuntimeError("DATABRICKS_BATCH_SIZE must be greater than zero")
         return cls(
             server_hostname=_required_env("DATABRICKS_SERVER_HOSTNAME"),
             http_path=_required_env("DATABRICKS_HTTP_PATH"),
@@ -92,8 +102,39 @@ class DatabricksConfig:
             catalog=os.getenv("DATABRICKS_CATALOG"),
             schema=os.getenv("DATABRICKS_SCHEMA"),
             table=os.getenv("DATABRICKS_TABLE", DEFAULT_TABLE),
-            batch_size=int(os.getenv("DATABRICKS_BATCH_SIZE", str(DEFAULT_BATCH_SIZE))),
+            batch_size=batch_size,
         )
+
+
+def telegram_channels_from_env(environ: Mapping[str, str] | None = None) -> tuple[str, ...]:
+    """Read TELEGRAM_CHANNEL and TELEGRAM_CHANNEL_2 through _100.
+
+    Empty values are ignored and duplicate channel names are removed
+    case-insensitively while preserving their first configured position.
+    """
+
+    values = os.environ if environ is None else environ
+    configured = [values.get("TELEGRAM_CHANNEL", DEFAULT_CHANNEL)]
+    configured.extend(
+        values.get(f"TELEGRAM_CHANNEL_{index}")
+        for index in range(2, MAX_TELEGRAM_CHANNELS + 1)
+    )
+
+    channels: list[str] = []
+    seen: set[str] = set()
+    for value in configured:
+        channel = (value or "").strip()
+        if not channel:
+            continue
+        normalized = channel.lstrip("@").casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        channels.append(channel)
+
+    if not channels:
+        raise RuntimeError("Configure at least one Telegram channel")
+    return tuple(channels)
 
 
 def _required_env(name: str) -> str:
@@ -115,6 +156,12 @@ def _quote_identifier(identifier: str) -> str:
     return f"`{identifier.replace('`', '``')}`"
 
 
+def _to_gmt_plus_8(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(GMT_PLUS_8)
+
+
 def _sql_literal(value: object) -> str:
     if value is None:
         return "NULL"
@@ -123,37 +170,37 @@ def _sql_literal(value: object) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, datetime):
-        return f"TIMESTAMP {_sql_literal(value.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))}"
+        wall_clock = _to_gmt_plus_8(value).replace(tzinfo=None)
+        return f"TIMESTAMP_NTZ{_sql_literal(wall_clock.strftime('%Y-%m-%d %H:%M:%S.%f'))}"
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _batched(items: Sequence[TelegramMessage], batch_size: int) -> Iterable[Sequence[TelegramMessage]]:
+def _batched(
+    items: Sequence[TelegramMessage], batch_size: int
+) -> Iterable[Sequence[TelegramMessage]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
 
 
 def message_limit_for_run(
-    *,
-    last_message_id: int,
-    initial_backfill_complete: bool,
-    per_run_limit: int,
+    *, last_message_id: int, initial_backfill_complete: bool, per_run_limit: int
 ) -> tuple[str, int | None]:
-    """Choose full-history or incremental extraction without skipping old messages.
-
-    The initial run must be unlimited. Applying a positive per-run limit to that run
-    and then advancing the checkpoint would permanently skip older Telegram messages.
-    Once the initial backfill succeeds, ``per_run_limit`` may cap later incremental
-    runs; zero means unlimited.
-    """
+    """Choose a full-history first run and incremental later runs."""
 
     if last_message_id < 0:
         raise ValueError("last_message_id must be zero or greater")
     if per_run_limit < 0:
         raise ValueError("TELEGRAM_PER_RUN_LIMIT must be zero or greater")
-
-    if not initial_backfill_complete and last_message_id == 0:
+    if not initial_backfill_complete:
         return "full_history", None
     return "incremental", per_run_limit or None
+
+
+def _sender_handle(sender: object | None) -> str | None:
+    username = getattr(sender, "username", None)
+    if not username:
+        return None
+    return f"@{str(username).lstrip('@')}"
 
 
 async def fetch_new_messages(
@@ -163,11 +210,10 @@ async def fetch_new_messages(
     limit: int | None = None,
     since_year: int | None = None,
 ) -> list[TelegramMessage]:
-    """Fetch Telegram messages newer than ``min_id`` in chronological order."""
+    """Fetch one channel's messages newer than ``min_id`` chronologically."""
 
-    scraped_at = datetime.now(timezone.utc)
+    scraped_at_gmt8 = datetime.now(GMT_PLUS_8)
     messages: list[TelegramMessage] = []
-
     session = StringSession(config.session_string) if config.session_string else config.session_name
     client = TelegramClient(session, config.api_id, config.api_hash)
     await client.connect()
@@ -179,273 +225,195 @@ async def fetch_new_messages(
             )
 
         async for msg in client.iter_messages(
-            config.channel,
-            min_id=min_id,
-            limit=limit,
-            reverse=True,
+            config.channel, min_id=min_id, limit=limit, reverse=True
         ):
-            if since_year and msg.date.year < since_year:
+            message_date_gmt8 = _to_gmt_plus_8(msg.date)
+            if since_year and message_date_gmt8.year < since_year:
                 continue
+            sender = await msg.get_sender()
             messages.append(
                 TelegramMessage(
                     id=msg.id,
                     channel=config.channel,
-                    date=msg.date.astimezone(timezone.utc),
+                    message_date_gmt8=message_date_gmt8,
                     message=msg.message,
                     sender_id=msg.sender_id,
-                    scraped_at=scraped_at,
+                    sender_handle=_sender_handle(sender),
+                    scraped_at_gmt8=scraped_at_gmt8,
                 )
             )
     finally:
         await client.disconnect()
-
     return messages
 
 
 def _table_columns(cursor, table_name: str) -> set[str]:
-    """Return normalized column names from a Databricks DESCRIBE TABLE result."""
-
     cursor.execute(f"DESCRIBE TABLE {table_name}")
     columns: set[str] = set()
     for row in cursor.fetchall():
-        column_name = str(row[0]).strip()
-        if not column_name or column_name.startswith("#"):
+        name = str(row[0]).strip()
+        if not name or name.startswith("#"):
             continue
-        columns.add(column_name.lower())
+        columns.add(name.lower())
     return columns
 
 
-def ensure_table(cursor, table_name: str, channel: str) -> bool:
-    """Create the destination table or migrate the legacy three-column schema."""
+def ensure_table(cursor, table_name: str) -> None:
+    """Create the clean-install schema and reject incompatible existing tables."""
 
     cursor.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
             channel STRING NOT NULL,
             id BIGINT NOT NULL,
-            message_date TIMESTAMP NOT NULL,
+            message_date_gmt8 TIMESTAMP_NTZ NOT NULL,
             message STRING,
             sender_id BIGINT,
-            scraped_at TIMESTAMP NOT NULL
+            sender_handle STRING,
+            scraped_at_gmt8 TIMESTAMP_NTZ NOT NULL
         )
         USING DELTA
         """
     )
-
     columns = _table_columns(cursor, table_name)
-    missing_base_columns = {"id", "message"} - columns
-    if missing_base_columns:
-        missing = ", ".join(sorted(missing_base_columns))
+    if columns != EXPECTED_TABLE_COLUMNS:
+        missing = ", ".join(sorted(EXPECTED_TABLE_COLUMNS - columns)) or "none"
+        extra = ", ".join(sorted(columns - EXPECTED_TABLE_COLUMNS)) or "none"
         raise RuntimeError(
-            f"Databricks table {table_name} is missing required columns: {missing}. "
-            "Use a different DATABRICKS_TABLE or repair the table schema before retrying."
-        )
-    if "date" not in columns and "message_date" not in columns:
-        raise RuntimeError(
-            f"Databricks table {table_name} has neither date nor message_date. "
-            "Use a different DATABRICKS_TABLE or repair the table schema before retrying."
+            f"Databricks table {table_name} does not match the clean-install schema. "
+            f"Missing columns: {missing}. Extra columns: {extra}. Drop this table or "
+            "choose a new DATABRICKS_TABLE, then rerun the initial backfill."
         )
 
-    migration_columns = {
-        "channel": "STRING",
-        "message_date": "TIMESTAMP",
-        "sender_id": "BIGINT",
-        "scraped_at": "TIMESTAMP",
-    }
-    missing_migration_columns = [name for name in migration_columns if name not in columns]
-    if missing_migration_columns:
-        LOGGER.info(
-            "Migrating legacy Databricks table %s; adding columns: %s",
-            table_name,
-            ", ".join(missing_migration_columns),
-        )
-        additions = ", ".join(
-            f"{_quote_identifier(name)} {migration_columns[name]}"
-            for name in missing_migration_columns
-        )
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMNS ({additions})")
 
-    # The legacy ``date`` column is also a retry-safe migration marker. These
-    # statements deliberately fill only NULL values, so a retry can finish a
-    # migration that previously stopped after ALTER TABLE without overwriting data.
-    if "date" in columns:
-        cursor.execute(
-            f"UPDATE {table_name} "
-            f"SET channel = {_sql_literal(channel)} WHERE channel IS NULL"
-        )
-        cursor.execute(
-            f"UPDATE {table_name} "
-            "SET message_date = `date` WHERE message_date IS NULL"
-        )
-        cursor.execute(
-            f"UPDATE {table_name} "
-            "SET scraped_at = COALESCE(message_date, current_timestamp()) "
-            "WHERE scraped_at IS NULL"
-        )
-
-    return "date" in columns
-
-
-def _merge_statement(table_name: str, values_sql: str, include_legacy_date: bool) -> str:
-    legacy_update = ",\n                        `date` = source.message_date" if include_legacy_date else ""
-    legacy_insert_column = ", `date`" if include_legacy_date else ""
-    legacy_insert_value = ", source.message_date" if include_legacy_date else ""
+def _merge_statement(table_name: str, values_sql: str) -> str:
     return f"""
         MERGE INTO {table_name} AS target
         USING (
             SELECT * FROM VALUES
             {values_sql}
-            AS source(channel, id, message_date, message, sender_id, scraped_at)
+            AS source(
+                channel, id, message_date_gmt8, message, sender_id,
+                sender_handle, scraped_at_gmt8
+            )
         ) AS source
         ON target.channel = source.channel AND target.id = source.id
         WHEN MATCHED THEN UPDATE SET
-            message_date = source.message_date,
+            message_date_gmt8 = source.message_date_gmt8,
             message = source.message,
             sender_id = source.sender_id,
-            scraped_at = source.scraped_at{legacy_update}
+            sender_handle = source.sender_handle,
+            scraped_at_gmt8 = source.scraped_at_gmt8
         WHEN NOT MATCHED THEN INSERT (
-            channel, id, message_date, message, sender_id, scraped_at{legacy_insert_column}
+            channel, id, message_date_gmt8, message, sender_id,
+            sender_handle, scraped_at_gmt8
         ) VALUES (
-            source.channel, source.id, source.message_date, source.message,
-            source.sender_id, source.scraped_at{legacy_insert_value}
+            source.channel, source.id, source.message_date_gmt8, source.message,
+            source.sender_id, source.sender_handle, source.scraped_at_gmt8
         )
     """
 
 
 def merge_messages(config: DatabricksConfig, messages: Sequence[TelegramMessage]) -> int:
-    """Idempotently merge Telegram messages into the configured Databricks table."""
+    """Idempotently merge messages into Databricks using ``(channel, id)``."""
 
     if not messages:
         return 0
-
     with sql.connect(
         server_hostname=config.server_hostname,
         http_path=config.http_path,
         access_token=config.access_token,
     ) as connection:
         with connection.cursor() as cursor:
-            include_legacy_date = ensure_table(
-                cursor, config.table_name, messages[0].channel
-            )
-
+            ensure_table(cursor, config.table_name)
             for batch in _batched(messages, config.batch_size):
-                values_sql = ",\n".join(
-                    "(" + ", ".join(
-                        [
-                            _sql_literal(message.channel),
-                            _sql_literal(message.id),
-                            _sql_literal(message.date),
-                            _sql_literal(message.message),
-                            _sql_literal(message.sender_id),
-                            _sql_literal(message.scraped_at),
-                        ]
-                    ) + ")"
-                    for message in batch
-                )
-                cursor.execute(
-                    _merge_statement(
-                        config.table_name,
-                        values_sql,
-                        include_legacy_date=include_legacy_date,
+                rows = []
+                for item in batch:
+                    rows.append(
+                        "(" + ", ".join(
+                            _sql_literal(value)
+                            for value in (
+                                item.channel,
+                                item.id,
+                                item.message_date_gmt8,
+                                item.message,
+                                item.sender_id,
+                                item.sender_handle,
+                                item.scraped_at_gmt8,
+                            )
+                        ) + ")"
                     )
-                )
-
+                cursor.execute(_merge_statement(config.table_name, ",\n".join(rows)))
     return len(messages)
+
+
+def write_csv(messages: Sequence[TelegramMessage], output_path: str | Path) -> None:
+    fieldnames = [
+        "channel",
+        "id",
+        "message_date_gmt8",
+        "message",
+        "sender_id",
+        "sender_handle",
+        "scraped_at_gmt8",
+    ]
+    with Path(output_path).open("w", newline="", encoding="utf-8") as output:
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for item in messages:
+            writer.writerow({name: getattr(item, name) for name in fieldnames})
 
 
 async def run_incremental_sync_async(
     *,
+    channel: str | None = None,
     min_id: int = 0,
     limit: int | None = None,
     since_year: int | None = None,
-    telegram_config: TelegramConfig | None = None,
-    databricks_config: DatabricksConfig | None = None,
-    csv_output: str | None = None,
-) -> dict[str, int | None]:
-    """Fetch new Telegram messages and load them into Databricks."""
-
-    telegram_config = telegram_config or TelegramConfig.from_env()
-    databricks_config = databricks_config or DatabricksConfig.from_env()
-
+    csv_output: str | Path | None = None,
+) -> dict[str, int | str | None]:
+    telegram_config = TelegramConfig.from_env(channel=channel)
+    databricks_config = DatabricksConfig.from_env()
     messages = await fetch_new_messages(
-        telegram_config,
-        min_id=min_id,
-        limit=limit,
-        since_year=since_year,
+        telegram_config, min_id=min_id, limit=limit, since_year=since_year
     )
-
-    if csv_output:
-        write_csv(csv_output, messages)
-
     inserted = merge_messages(databricks_config, messages)
-    max_message_id = max((message.id for message in messages), default=min_id)
-
+    if csv_output:
+        write_csv(messages, csv_output)
     return {
+        "channel": telegram_config.channel,
         "fetched": len(messages),
         "merged": inserted,
-        "max_message_id": max_message_id,
+        "max_message_id": max((message.id for message in messages), default=None),
     }
 
 
-def run_incremental_sync(**kwargs) -> dict[str, int | None]:
-    """Synchronous wrapper suitable for Airflow PythonOperator tasks."""
-
+def run_incremental_sync(**kwargs) -> dict[str, int | str | None]:
     return asyncio.run(run_incremental_sync_async(**kwargs))
 
 
-def write_csv(output_file: str, messages: Sequence[TelegramMessage]) -> None:
-    """Write fetched messages to CSV for ad hoc audits or local exports."""
-
-    output_path = Path(output_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["id", "channel", "date", "message", "sender_id", "scraped_at"])
-        for message in messages:
-            writer.writerow(
-                [
-                    message.id,
-                    message.channel,
-                    message.date.isoformat(),
-                    message.message,
-                    message.sender_id,
-                    message.scraped_at.isoformat(),
-                ]
-            )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Mirror Telegram messages into Databricks SQL.")
-    parser.add_argument("--min-id", type=int, default=int(os.getenv("TELEGRAM_MIN_ID", "0")))
-    parser.add_argument("--limit", type=int, default=int(os.getenv("TELEGRAM_LIMIT", "0")) or None)
-    parser.add_argument("--since-year", type=int, default=int(os.getenv("TELEGRAM_SINCE_YEAR", "0")) or None)
-    parser.add_argument(
-        "--csv-output",
-        default=os.getenv("TELEGRAM_CSV_OUTPUT", DEFAULT_CSV_OUTPUT),
-        help="CSV audit output path for manual runs.",
-    )
-    parser.add_argument(
-        "--no-csv-output",
-        action="store_true",
-        help="Disable CSV audit output for this manual run.",
-    )
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--channel", default=None)
+    parser.add_argument("--min-id", type=int, default=0)
+    parser.add_argument("--limit", type=int, default=0, help="0 means no limit")
+    parser.add_argument("--since-year", type=int)
+    parser.add_argument("--csv-output", default=DEFAULT_CSV_OUTPUT)
+    parser.add_argument("--no-csv-output", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
-    args = parse_args()
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
     result = run_incremental_sync(
+        channel=args.channel,
         min_id=args.min_id,
-        limit=args.limit,
+        limit=args.limit or None,
         since_year=args.since_year,
         csv_output=None if args.no_csv_output else args.csv_output,
     )
-    print(
-        "Sync complete: "
-        f"fetched={result['fetched']}, merged={result['merged']}, "
-        f"max_message_id={result['max_message_id']}"
-    )
+    print(result)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
-"""Airflow DAG for continuously loading Telegram messages into Databricks SQL."""
+"""Airflow DAG for loading multiple Telegram channels into Databricks SQL."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timedelta
@@ -9,11 +10,14 @@ from datetime import datetime, timedelta
 from airflow.decorators import dag, task
 from airflow.models import Variable
 
-from telegram_scraper import message_limit_for_run, run_incremental_sync
+from telegram_scraper import (
+    message_limit_for_run,
+    run_incremental_sync,
+    telegram_channels_from_env,
+)
 
 DAG_ID = "telegram_to_databricks_live_sync"
-LAST_MESSAGE_ID_VARIABLE = "telegram_scraper_last_message_id"
-INITIAL_BACKFILL_COMPLETE_VARIABLE = "telegram_scraper_initial_backfill_complete"
+CHANNEL_STATE_VARIABLE = "telegram_scraper_channel_state"
 LOGGER = logging.getLogger(__name__)
 SECRET_VARIABLES = {
     "TELEGRAM_API_ID": "telegram_api_id",
@@ -39,8 +43,6 @@ def _bool_variable(name: str, default: bool = False) -> bool:
 
 
 def _load_secret_environment() -> None:
-    """Resolve sensitive values through Airflow's configured secrets backend."""
-
     for environment_name, variable_name in SECRET_VARIABLES.items():
         if os.getenv(environment_name):
             continue
@@ -49,9 +51,20 @@ def _load_secret_environment() -> None:
             os.environ[environment_name] = value
 
 
+def _channel_state() -> dict[str, dict[str, int | bool]]:
+    raw = Variable.get(CHANNEL_STATE_VARIABLE, default_var="{}")
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Airflow Variable {CHANNEL_STATE_VARIABLE} must be valid JSON") from exc
+    if not isinstance(state, dict):
+        raise ValueError(f"Airflow Variable {CHANNEL_STATE_VARIABLE} must contain a JSON object")
+    return state
+
+
 @dag(
     dag_id=DAG_ID,
-    description="Incrementally scrape Telegram channel messages and upsert them into Databricks SQL.",
+    description="Backfill and incrementally sync multiple Telegram channels into Databricks SQL.",
     start_date=datetime(2026, 1, 1),
     schedule=os.getenv("TELEGRAM_AIRFLOW_SCHEDULE", "*/15 * * * *"),
     catchup=False,
@@ -65,38 +78,53 @@ def _load_secret_environment() -> None:
 )
 def telegram_to_databricks_live_sync():
     @task
-    def sync_messages() -> dict[str, int | str | None]:
+    def sync_messages() -> dict[str, object]:
         _load_secret_environment()
-        last_message_id = int(Variable.get(LAST_MESSAGE_ID_VARIABLE, default_var="0"))
-        initial_backfill_complete = _bool_variable(INITIAL_BACKFILL_COMPLETE_VARIABLE)
+        channels = telegram_channels_from_env()
+        state = _channel_state()
         per_run_limit = _int_env("TELEGRAM_PER_RUN_LIMIT", 0)
         since_year = _int_env("TELEGRAM_SINCE_YEAR", 0) or None
-        sync_mode, limit = message_limit_for_run(
-            last_message_id=last_message_id,
-            initial_backfill_complete=initial_backfill_complete,
-            per_run_limit=per_run_limit,
-        )
-        LOGGER.info(
-            "Starting Telegram sync mode=%s min_id=%s limit=%s",
-            sync_mode,
-            last_message_id,
-            "unlimited" if limit is None else limit,
-        )
+        channel_results: list[dict[str, int | str | None]] = []
 
-        result = run_incremental_sync(
-            min_id=last_message_id,
-            limit=limit,
-            since_year=since_year,
-        )
+        for channel in channels:
+            saved = state.get(channel, {})
+            last_message_id = int(saved.get("last_message_id", 0))
+            backfill_complete = bool(saved.get("initial_backfill_complete", False))
+            sync_mode, limit = message_limit_for_run(
+                last_message_id=last_message_id,
+                initial_backfill_complete=backfill_complete,
+                per_run_limit=per_run_limit,
+            )
+            LOGGER.info(
+                "Starting Telegram sync channel=%s mode=%s min_id=%s limit=%s",
+                channel,
+                sync_mode,
+                last_message_id,
+                "unlimited" if limit is None else limit,
+            )
+            result = run_incremental_sync(
+                channel=channel,
+                min_id=last_message_id,
+                limit=limit,
+                since_year=since_year,
+            )
+            max_message_id = result.get("max_message_id")
+            state[channel] = {
+                "last_message_id": max(last_message_id, int(max_message_id or 0)),
+                "initial_backfill_complete": True,
+            }
+            Variable.set(CHANNEL_STATE_VARIABLE, json.dumps(state, sort_keys=True))
+            result["sync_mode"] = sync_mode
+            channel_results.append(result)
 
-        max_message_id = result.get("max_message_id")
-        if max_message_id and max_message_id > last_message_id:
-            Variable.set(LAST_MESSAGE_ID_VARIABLE, str(max_message_id))
-        if not initial_backfill_complete:
-            Variable.set(INITIAL_BACKFILL_COMPLETE_VARIABLE, "true")
-
-        result["sync_mode"] = sync_mode
-        return result
+        modes = {result["sync_mode"] for result in channel_results}
+        return {
+            "channels": channel_results,
+            "channel_count": len(channel_results),
+            "fetched": sum(int(result["fetched"]) for result in channel_results),
+            "merged": sum(int(result["merged"]) for result in channel_results),
+            "sync_mode": modes.pop() if len(modes) == 1 else "mixed",
+        }
 
     sync_messages()
 
