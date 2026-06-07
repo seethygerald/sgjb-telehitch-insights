@@ -32,6 +32,16 @@ def _int_env(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def _bool_variable(name: str, default: bool = False) -> bool:
+    value = Variable.get(name, default_var=str(default).lower())
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "y"}:
+        return True
+    if normalized in {"false", "0", "no", "n"}:
+        return False
+    raise ValueError(f"Airflow Variable {name} must be true or false, got {value!r}")
+
+
 def _load_secret_environment() -> None:
     for environment_name, variable_name in SECRET_VARIABLES.items():
         if os.getenv(environment_name):
