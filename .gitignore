@@ -12,3 +12,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+
+# Oracle VM deployment secrets and local Airflow state exports.
+deploy/oracle-vm/airflow.env
+deploy/oracle-vm/channel-state.json
