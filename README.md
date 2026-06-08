@@ -180,3 +180,17 @@ Manual execution processes one channel and does not maintain Airflow's per-chann
 ```bash
 python -m pytest -q
 ```
+
+## Oracle Always Free VM deployment
+
+For a lower-cost self-managed alternative to Cloud Composer, this repository includes a Docker Compose deployment for a single Oracle Cloud Ubuntu VM:
+
+```text
+deploy/oracle-vm/
+  Dockerfile
+  compose.yaml
+  airflow.env.example
+  README.md
+```
+
+Use the Oracle deployment README for the full migration steps. The same dynamic source configuration works there: add `TELEGRAM_CHANNEL_4`, `TELEGRAM_CHANNEL_5`, and so on up to `TELEGRAM_CHANNEL_100`, recreate the Airflow services, and the new source will begin its own paged historical backfill while existing sources remain incremental.
