@@ -75,7 +75,12 @@ fi
 if "$AIRFLOW_COMMAND" variables get "$STATE_VARIABLE" >/dev/null 2>&1; then
   pass "Checkpoint variable ${STATE_VARIABLE} exists"
 else
-  warn "Checkpoint variable ${STATE_VARIABLE} is absent; a first-time deployment will start historical backfills"
+  warn "Checkpoint variable ${STATE_VARIABLE} is absent"
+  if [[ -f "${HOME}/airflow/airflow.db" ]] || find "${HOME}/airflow/backups" -maxdepth 1 -type f -name 'pre-postgres-airflow-*.db' -print -quit 2>/dev/null | grep -q .; then
+    warn "Retained SQLite metadata exists; run deploy/aws-ec2/recover-channel-state-from-sqlite.sh before triggering the DAG"
+  else
+    warn "A first-time deployment will start historical backfills"
+  fi
 fi
 
 if swapon --show=NAME --noheadings | grep -q .; then

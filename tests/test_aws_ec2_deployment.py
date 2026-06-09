@@ -138,6 +138,17 @@ def test_ec2_postgres_backup_and_sqlite_migration_helpers():
     assert '"${DEPLOY_DIR}/install.sh"' in migration
     assert '"${DEPLOY_DIR}/import-channel-state.sh"' in migration
     assert "migrate-metadata-to-postgres.sh" in updater
+    assert "an empty state will be imported" not in migration
+    assert "Migration stopped before changing metadata" in migration
+
+    recovery_path = DEPLOY / "recover-channel-state-from-sqlite.sh"
+    recovery = recovery_path.read_text()
+    assert recovery_path.stat().st_mode & 0o111
+    assert "pre-postgres-airflow-*.db" in recovery
+    assert "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN" in recovery
+    assert "AIRFLOW__CORE__EXECUTOR=SequentialExecutor" in recovery
+    assert "variables get" in recovery
+    assert "airflow.env" in recovery
 
 
 def test_ec2_scheduler_path_failure_is_documented():

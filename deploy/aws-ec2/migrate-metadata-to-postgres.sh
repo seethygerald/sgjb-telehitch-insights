@@ -18,9 +18,10 @@ printf 'Preserving telegram_scraper_channel_state...\n'
 if "${AIRFLOW_COMMAND}" variables get telegram_scraper_channel_state >"${STATE_FILE}" 2>/dev/null; then
   chmod 600 "${STATE_FILE}"
 else
-  printf '{}\n' >"${STATE_FILE}"
-  chmod 600 "${STATE_FILE}"
-  echo "Warning: checkpoint Variable was absent; an empty state will be imported." >&2
+  echo "Checkpoint Variable telegram_scraper_channel_state is absent from SQLite." >&2
+  echo "Migration stopped before changing metadata. Import the Composer checkpoint first," >&2
+  echo "or explicitly create {} only if a complete historical replay is intended." >&2
+  exit 1
 fi
 
 backup="${AIRFLOW_HOME}/backups/pre-postgres-airflow-$(date -u +'%Y%m%dT%H%M%SZ').db"
