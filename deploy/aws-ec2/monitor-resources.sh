@@ -77,13 +77,13 @@ while (( $(date +%s) < end_epoch )); do
       -v available="${mem_available_kib}" \
       -v used="$((mem_total_kib - mem_available_kib))" \
       -v swap_used="$((swap_total_kib - swap_free_kib))" \
-      -v load="${load_1m}" \
+      -v load_value="${load_1m}" \
       -v cpu="${cpu_used}" \
       -v scheduler="${scheduler_bytes}" \
       -v webserver="${webserver_bytes}" \
       -v postgres="${postgres_rss_kib}" \
       -v airflow="${airflow_rss_kib}" \
-      'BEGIN {printf "%s,%.1f,%.1f,%.1f,%s,%s,%.1f,%.1f,%.1f,%.1f\n", timestamp, available/1024, used/1024, swap_used/1024, load, cpu, scheduler/1048576, webserver/1048576, postgres/1024, airflow/1024}' \
+      'BEGIN {printf "%s,%.1f,%.1f,%.1f,%s,%s,%.1f,%.1f,%.1f,%.1f\n", timestamp, available/1024, used/1024, swap_used/1024, load_value, cpu, scheduler/1048576, webserver/1048576, postgres/1024, airflow/1024}' \
       >>"${OUTPUT_FILE}"
 done
 

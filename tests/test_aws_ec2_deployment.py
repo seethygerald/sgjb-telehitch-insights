@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 ROOT = Path(__file__).parents[1]
 DEPLOY = ROOT / "deploy" / "aws-ec2"
@@ -181,3 +182,23 @@ def test_ec2_resource_monitor_captures_task_capacity_signals():
     assert "never prompts for a sudo password" in guide
     assert "monitor-resources.sh 3600 5" in guide
     assert "CPUCreditBalance" in guide
+    assert '-v load_value="${load_1m}"' in monitor
+    assert '-v load="${load_1m}"' not in monitor
+
+
+def test_ec2_resource_monitor_executes_and_writes_a_sample(tmp_path):
+    output = tmp_path / "monitor.csv"
+    result = subprocess.run(
+        [str(DEPLOY / "monitor-resources.sh"), "2", "1", str(output)],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert result.returncode == 0, result.stderr
+    rows = output.read_text().splitlines()
+    assert rows[0].startswith("timestamp_utc,mem_available_mib")
+    assert len(rows) >= 2
+    assert "Resource summary:" in result.stdout
