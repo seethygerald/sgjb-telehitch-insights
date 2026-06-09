@@ -1,0 +1,86 @@
+name: telehitch-airflow
+
+x-airflow-common: &airflow-common
+  build:
+    context: ../..
+    dockerfile: deploy/oracle-vm/Dockerfile
+  image: telehitch-airflow:2.10.5
+  env_file:
+    - airflow.env
+  environment: &airflow-environment
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    PYTHONPATH: /opt/airflow/dags
+  volumes:
+    - ../../dags:/opt/airflow/dags:ro
+    - airflow_logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      - airflow.env
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_DB: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      <<: *airflow-environment
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USERNAME}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+      _AIRFLOW_WWW_USER_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME:-Airflow}
+      _AIRFLOW_WWW_USER_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME:-Admin}
+      _AIRFLOW_WWW_USER_EMAIL: ${AIRFLOW_ADMIN_EMAIL}
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  postgres_data:
+  airflow_logs:
