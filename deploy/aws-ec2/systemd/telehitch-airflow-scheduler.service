@@ -1,0 +1,22 @@
+[Unit]
+Description=Telehitch Apache Airflow scheduler
+Wants=network-online.target
+Requires=postgresql.service
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=__AIRFLOW_USER__
+Group=__AIRFLOW_GROUP__
+WorkingDirectory=__REPO_ROOT__
+EnvironmentFile=__RUNTIME_ENV__
+EnvironmentFile=__APPLICATION_ENV__
+Environment="PATH=__VENV_ROOT__/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=__VENV_ROOT__/bin/airflow scheduler
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
