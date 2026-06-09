@@ -1,0 +1,20 @@
+[Unit]
+Description=Telehitch Apache Airflow webserver
+Wants=network-online.target
+After=network-online.target telehitch-airflow-scheduler.service
+
+[Service]
+Type=simple
+User=__AIRFLOW_USER__
+Group=__AIRFLOW_GROUP__
+WorkingDirectory=__REPO_ROOT__
+EnvironmentFile=__RUNTIME_ENV__
+EnvironmentFile=__APPLICATION_ENV__
+ExecStart=__VENV_ROOT__/bin/airflow webserver --hostname 127.0.0.1 --port 8080
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
