@@ -187,8 +187,8 @@ python -m pytest -q
 
 For a continuously running Airflow scheduler and web UI on Ubuntu EC2, use
 `deploy/aws-ec2/`. It installs Airflow 2.10.5 in a Python virtual environment
-with SQLite, `SequentialExecutor`, systemd-managed scheduler and webserver
-services, daily metadata backups, optional swap creation for small instances,
+with PostgreSQL, `LocalExecutor`, systemd-managed scheduler and webserver
+services, daily PostgreSQL backups, optional swap creation for small instances,
 and private UI access through an SSH tunnel.
 
 See `deploy/aws-ec2/README.md` for the complete first-time AWS account, EC2,

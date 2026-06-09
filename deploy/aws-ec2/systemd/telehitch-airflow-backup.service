@@ -1,5 +1,8 @@
 [Unit]
-Description=Back up the Telehitch Airflow SQLite metadata database
+Description=Back up the Telehitch Airflow PostgreSQL metadata database
+
+Requires=postgresql.service
+After=postgresql.service
 
 [Service]
 Type=oneshot

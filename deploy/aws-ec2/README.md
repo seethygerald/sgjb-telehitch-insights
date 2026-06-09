@@ -7,12 +7,12 @@ Telegram-to-Databricks DAG every 15 minutes.
 The deployment uses:
 
 - Apache Airflow 2.10.5 in a Python virtual environment;
-- SQLite for Airflow metadata;
-- `SequentialExecutor`, which runs one task at a time;
+- PostgreSQL for persistent Airflow metadata;
+- `LocalExecutor`, limited to one active task for this single-machine deployment;
 - one Airflow scheduler process;
 - one Airflow webserver worker;
 - systemd services that restart Airflow after a process failure or EC2 reboot;
-- daily SQLite metadata backups;
+- daily PostgreSQL metadata backups;
 - an SSH tunnel for private access to the Airflow UI;
 - paged historical Telegram ingestion followed by incremental ingestion;
 - support for up to 100 Telegram channels and optional forum topics.
@@ -25,7 +25,8 @@ AWS EC2 Ubuntu instance
 ├── systemd: telehitch-airflow-webserver
 ├── systemd timer: telehitch-airflow-backup
 ├── Python virtual environment: ~/airflow-venv
-├── Airflow metadata, logs, and backups: ~/airflow
+├── PostgreSQL metadata database: local port 5432
+├── Airflow logs and backups: ~/airflow
 └── repository DAGs: ~/sgjb-telehitch-insights/dags
     ├── telegram_to_databricks.py
     └── telegram_scraper.py
@@ -135,13 +136,20 @@ The installation is optimized for one DAG and one task at a time.
 
 | Instance type | Memory | Use case |
 |---|---:|---|
-| `t2.micro` or `t3.micro` | 1 GiB | Lowest-cost functional test; the installer creates swap |
-| `t2.small` or `t3.small` | 2 GiB | Recommended small-instance starting point |
+| `t2.micro` or `t3.micro` | 1 GiB | Temporary experiment only; PostgreSQL and Airflow can exhaust memory even with swap |
+| `t2.small` or `t3.small` | 2 GiB | Minimum supported small-instance starting point |
 | `t3.medium` | 4 GiB | More capacity for backfills and a more responsive UI |
 
-For a first small deployment, select `t3.small` when it is available at an
-acceptable price. Select only an instance type whose displayed price and account
-benefits you have reviewed in the EC2 launch page.
+This guide uses `t3.small` for the initial deployment. It provides 2 vCPUs and
+2 GiB memory. The installer creates a 2 GiB swap file on this instance size and
+limits Airflow to one active task, one DAG parser, and one webserver worker. If
+the scheduler, webserver, PostgreSQL, or task is repeatedly killed or restarted,
+resize the instance to `t3.medium`.
+
+If you intentionally test `t3.micro`, select it only when the EC2 launch page marks it **Free tier eligible**
+or its displayed price is acceptable for your account. T3 instances are
+burstable; this guide selects **Standard** CPU credit mode to avoid surplus CPU
+credit charges.
 
 Use these initial ingestion settings on a micro or small instance:
 
@@ -184,71 +192,240 @@ carefully.
 AWS does not provide another download of the same private key. Never commit it to
 this repository.
 
+If **Create key pair** is not available inside the launch wizard, do not select
+**Proceed without a key pair**. Leave the launch wizard open in one tab and create
+the key separately:
+
+1. Open a second AWS console tab in the same Region.
+2. Open **EC2 → Network & Security → Key Pairs**.
+3. Click **Create key pair** and use the selections above.
+4. Return to the launch-wizard tab and refresh the key-pair list or reload the
+   page.
+5. Select `telehitch-airflow`.
+
+If the separate **Key Pairs** page also does not show **Create key pair**, or AWS
+shows `AccessDenied`, the signed-in identity lacks `ec2:CreateKeyPair` permission.
+Sign in with the administrator identity created during account setup or ask the
+AWS account administrator to grant that permission. Do not launch this instance
+without a key: this deployment relies on persistent SSH access for installation,
+VS Code, maintenance, and recovery.
+
 ---
 
 ## Phase 5: launch the Ubuntu EC2 instance
 
-1. Open **EC2 → Instances**.
-2. Click **Launch instances**.
-3. Enter the instance name:
+Open **EC2 → Instances** and click **Launch instances**. Use the selections below
+exactly unless your AWS account or Region does not offer an option.
+
+### Name and tags
+
+| Field | Select or enter |
+|---|---|
+| Name | `telehitch-airflow` |
+| Additional tags | Leave empty for now |
+
+### Application and OS Image
+
+1. Under **Quick Start**, click **Ubuntu**.
+2. Select the plain server image named similar to:
 
    ```text
-   telehitch-airflow
+   Ubuntu Server 24.04 LTS (HVM), SSD Volume Type
    ```
 
-4. Under **Application and OS Images**, select **Ubuntu**.
-5. Select **Ubuntu Server 22.04 LTS** with the **64-bit (x86)** architecture.
-6. Confirm that the image publisher is Canonical.
-7. Under **Instance type**, select the size chosen in Phase 3.
-8. Under **Key pair**, select:
+3. Select architecture:
 
    ```text
-   telehitch-airflow
+   64-bit (x86)
    ```
 
-### Configure networking
+4. Confirm the provider is **Canonical**. Canonical's AWS owner ID is
+   `099720109477`.
+5. Confirm the image description does not include any of these:
 
-9. Click **Edit** under **Network settings**.
-10. Keep the default VPC and public subnet for this beginner deployment.
-11. Enable **Auto-assign public IP**.
-12. Create a new security group named:
+   ```text
+   SQL Server
+   Ubuntu Pro
+   Desktop
+   Marketplace software
+   ```
 
-    ```text
-    telehitch-airflow-ssh
-    ```
+6. Do not select an image containing **SQL Server**. Those images include Microsoft
+   SQL Server licensing and software that this project does not use. Additional
+   AMI software charges can apply.
+7. Do not select Ubuntu Server 26.04 for this deployment. Ubuntu 24.04 includes
+   Python 3.12, which is supported by the pinned Airflow 2.10.5 installation.
+   Ubuntu 26.04 uses a newer Python generation that is outside this deployment
+   configuration.
+8. If AWS shows multiple 24.04 choices, select the regular **Server** image, not
+   Minimal, Desktop, Pro, or an image bundled with third-party software.
+9. AMI IDs differ by AWS Region and image release, so select by the image name,
+   architecture, and verified Canonical provider rather than copying an AMI ID
+   from another Region.
 
-13. Add one inbound rule:
+### Instance type
 
-    | Type | Port | Source |
-    |---|---:|---|
-    | SSH | 22 | My IP |
+| Field | Select |
+|---|---|
+| Instance type | `t3.small` |
+| vCPUs | 2 |
+| Memory | 1 GiB |
+| Purchase option | On-Demand; do not request Spot |
 
-14. Do not add an inbound rule for port 8080.
-15. Keep the default outbound rule so the instance can reach package repositories,
-    Telegram, GitHub, and Databricks over HTTPS.
+Confirm that the console displays **Free tier eligible** or that you accept the
+shown hourly price.
+
+### Key pair
+
+Under **Key pair (login)**, select the key pair created earlier:
+
+```text
+telehitch-airflow
+```
+
+If the dropdown contains only **Proceed without a key pair**, stop here and use
+the separate **EC2 → Network & Security → Key Pairs** page described in Phase 4.
+Do not launch until `telehitch-airflow` appears in this dropdown.
+
+### Network settings
+
+Click **Edit** and use:
+
+| Field | Select or enter |
+|---|---|
+| Network | Default VPC |
+| Subnet | No preference (default subnet in any Availability Zone) |
+| Auto-assign public IP | Enable |
+| Firewall | Create security group |
+| Security group name | `telehitch-airflow-ssh` |
+| Description | `SSH access to Telehitch Airflow EC2` |
+
+Delete every automatically proposed inbound rule, including MSSQL, HTTP, and
+HTTPS. Then add exactly one inbound rule:
+
+| Type | Protocol | Port | Source type | Source |
+|---|---|---:|---|---|
+| SSH | TCP | 22 | My IP | Your current public IPv4 `/32` |
+
+The final inbound-rule list must not contain:
+
+```text
+MSSQL 1433
+HTTP 80
+HTTPS 443
+Custom TCP 8080
+SSH from 0.0.0.0/0
+```
+
+Keep the default outbound rule that permits outbound traffic. The EC2 instance
+needs outbound HTTPS access to Ubuntu package repositories, GitHub, Telegram,
+and Databricks.
+
+If your home public IP changes later, edit the security group's SSH source to
+your new **My IP** value.
 
 ### Configure storage
 
-16. Set the root volume to 25–30 GiB using `gp3`.
-17. Keep encryption enabled.
-18. Keep **Delete on termination** enabled unless you have a specific retention
-    requirement.
+In **Storage (volumes)**, keep **Simple → EBS Volumes** selected. Configure
+**Volume 1 (AMI Root)** as follows:
 
-### Launch
+| Field | Select or enter |
+|---|---|
+| Storage type | `EBS` |
+| Device name | Keep `/dev/sda1` |
+| Snapshot | Keep the snapshot supplied by the selected Ubuntu AMI |
+| Size | `30 GiB` |
+| Volume type | `gp3` |
+| IOPS | `3000` |
+| Throughput | `125 MiB/s` |
+| Delete on termination | `Yes` |
+| Volume initialization rate | Leave blank; selecting a rate adds charges |
 
-19. Review the Summary panel, including the instance price, EBS storage, public
-    IPv4 pricing, architecture, and Region.
-20. Click **Launch instance**.
-21. Open **View all instances**.
-22. Wait until:
+The **Encrypted** field initially displays **Not encrypted**. This value is a
+selector:
 
-    ```text
-    Instance state: Running
-    Status checks: 2/2 checks passed
-    ```
+1. Click **Not encrypted**.
+2. Change it to **Encrypted**.
+3. The **KMS key** field becomes available.
+4. Open **KMS key → Select**.
+5. Choose the AWS managed EBS key, displayed as `aws/ebs`, `(default) aws/ebs`,
+   or an ARN ending in `alias/aws/ebs`.
+6. Do not create a customer-managed KMS key for this deployment.
 
-23. Select the instance and record its **Public IPv4 DNS** and **Public IPv4
-    address**.
+If the selector cannot be changed because of an AWS account policy, stop before
+launching and ask the account administrator to permit encrypted EBS volume
+creation. The separate account-wide **EBS encryption by default** setting is not
+required when you encrypt this root volume directly in the launch wizard.
+
+Under **File systems**, select **None**. Do not select S3 Files, EFS, or FSx, and
+do not add another EBS or instance-store volume.
+
+### Advanced details
+
+Expand **Advanced details** and use:
+
+| Field | Select |
+|---|---|
+| Domain join directory | None |
+| IAM instance profile | None |
+| Hostname type | IP name/default |
+| DNS Hostname | Enable/default |
+| Instance auto-recovery | Default |
+| Shutdown behavior | Stop |
+| Stop - Hibernate behavior | Disable |
+| Termination protection | Enable |
+| Stop protection | Enable if offered |
+| Detailed CloudWatch monitoring | Disable |
+| Tenancy | Shared |
+| Credit specification | Standard |
+| Placement group | None |
+| Capacity reservation | Open/default |
+| User data | Leave blank |
+
+For **Metadata options**, keep the endpoint enabled and require IMDSv2 if the
+wizard offers the choice:
+
+```text
+Metadata accessible: Enabled
+Metadata version: V2 only / Required
+Metadata response hop limit: 1
+```
+
+Termination and stop protection prevent accidental console actions. You can
+disable the relevant protection later if you intentionally need to stop or
+terminate the instance.
+
+### Review the Summary and launch
+
+Before clicking **Launch instance**, confirm the Summary shows:
+
+```text
+Number of instances: 1
+Software Image: plain Canonical Ubuntu Server 24.04 LTS
+Instance type: t3.small
+Firewall: telehitch-airflow-ssh
+Inbound access: SSH 22 from My IP only
+Storage: one 30 GiB gp3 root volume with EBS encryption enabled
+```
+
+If the Summary still says **SQL Server**, go back to the AMI section and select
+the plain Canonical Ubuntu Server image.
+
+Then:
+
+1. Click **Launch instance**.
+2. Click **View all instances**.
+3. Wait until:
+
+   ```text
+   Instance state: Running
+   Status checks: 2/2 checks passed
+   ```
+
+4. Select the instance.
+5. Record its **Instance ID**, **Public IPv4 address**, and **Public IPv4 DNS**.
+6. Open its **Security** tab and verify the only inbound permission is SSH port
+   22 from your public `/32` address.
 
 ---
 
@@ -279,7 +456,84 @@ whoami
 hostname
 ```
 
-`whoami` should print `ubuntu`.
+`whoami` should print `ubuntu`. If your prompt remains similar to
+`gerald@Geralds-MacBook-Pro`, you are still on your Mac and the EC2 login did
+not succeed.
+
+### If SSH says `Permission denied (publickey)`
+
+This error means the instance was reachable on port 22, but it rejected the
+private key offered by your Mac. It is not an Airflow problem and changing the
+security group will not fix a public-key rejection.
+
+First, open **EC2 → Instances**, select `telehitch-airflow`, and inspect the
+instance **Details**. Find **Key pair name**.
+
+- If it says `telehitch-airflow`, continue with the local-key checks below.
+- If it shows another name, use the `.pem` file belonging to that exact key
+  pair.
+- If it is blank or says that no key pair is assigned, the instance was
+  launched with **Proceed without a key pair**. Creating a key pair afterward
+  does not install its public key on the existing instance.
+
+For a new instance that contains no work, the safest recovery for a missing or
+wrong launch key is:
+
+1. Select the unusable instance in **EC2 → Instances**.
+2. Choose **Instance state → Terminate instance**. If termination protection is
+   enabled, first use **Actions → Instance settings → Change termination
+   protection** to disable it.
+3. Keep the `telehitch-airflow` key pair that you already downloaded.
+4. Launch a replacement instance with the same Ubuntu, network, and storage
+   selections.
+5. In **Key pair (login)**, explicitly select `telehitch-airflow` before
+   launching.
+6. Wait for `2/2 checks passed` and connect to the replacement instance.
+
+Do not repeatedly recreate private keys with the same intended purpose. The
+private `.pem` file must correspond to the public key that EC2 installed when
+the instance was launched.
+
+On your Mac, validate the existing key:
+
+```bash
+ls -l ~/.ssh/telehitch-airflow.pem
+chmod 400 ~/.ssh/telehitch-airflow.pem
+ssh-keygen -y -f ~/.ssh/telehitch-airflow.pem >/dev/null \
+  && echo "Private key is readable"
+```
+
+Then use the repository's diagnostic helper with the instance's actual
+**Public IPv4 DNS** or **Public IPv4 address**:
+
+```bash
+cd /path/to/sgjb-telehitch-insights
+
+./deploy/aws-ec2/check-ssh.sh \
+  YOUR_ACTUAL_EC2_PUBLIC_DNS \
+  ~/.ssh/telehitch-airflow.pem
+```
+
+The helper forces SSH to offer only this key, prints its derived public-key
+fingerprint, and enables verbose authentication output. It must be run on your
+Mac, where the `.pem` file is stored.
+
+You can also run the equivalent command directly:
+
+```bash
+ssh -vvv \
+  -o IdentitiesOnly=yes \
+  -i ~/.ssh/telehitch-airflow.pem \
+  ubuntu@YOUR_ACTUAL_EC2_PUBLIC_DNS
+```
+
+Use `ubuntu` for the plain Canonical Ubuntu AMI. Do not use your Mac username
+`gerald`, and do not include `https://` in the hostname.
+
+In the verbose output, a line similar to `Offering public key` followed by
+`Permission denied (publickey)` confirms that the selected private key does not
+match a public key accepted by the instance. Recheck **Key pair name** in EC2;
+do not solve this by opening port 22 to the whole internet.
 
 ### VS Code Remote SSH method
 
@@ -520,18 +774,18 @@ From the repository root:
 
 The installer performs these operations:
 
-1. installs Ubuntu build tools, Python virtual-environment support, and SQLite;
+1. installs Ubuntu build tools, PostgreSQL, and Python virtual-environment support;
 2. creates a 2 GiB swap file when the instance has less than 3 GiB RAM;
 3. creates `~/airflow-venv`;
-4. installs Apache Airflow 2.10.5 with the official constraint file;
+4. installs Apache Airflow 2.10.5 with PostgreSQL support and official constraints;
 5. installs Telethon and the Databricks SQL connector;
-6. creates `~/airflow` for metadata, logs, and backups;
-7. configures SQLite and `SequentialExecutor`;
-8. configures one parser, one task at a time, and one webserver worker;
-9. migrates the Airflow metadata database;
-10. creates the administrator account;
+6. creates a local PostgreSQL role and database with a generated password;
+7. tunes PostgreSQL conservatively for a small EC2 instance;
+8. configures Airflow with PostgreSQL and `LocalExecutor`;
+9. limits Airflow to one parser, one active task, and one webserver worker;
+10. migrates the Airflow metadata database and creates the administrator;
 11. installs and starts the scheduler and webserver systemd services;
-12. installs and starts the daily backup timer.
+12. installs and starts the daily PostgreSQL backup timer.
 
 The installation can take several minutes on a small instance.
 
@@ -554,27 +808,43 @@ swapon --show
 
 ---
 
-## Phase 11: verify that Airflow parsed the DAG
+## Phase 11: verify the Airflow installation and DAG
 
-Run:
+Run the combined verification helper:
+
+```bash
+./deploy/aws-ec2/verify-install.sh
+```
+
+It checks the scheduler, webserver, backup timer, DAG registration, DAG import
+errors, checkpoint Variable, swap, and recent scheduler logs. A first-time
+installation may show a warning that `telegram_scraper_channel_state` is absent;
+that is expected before the first successful historical page. A migration should
+import that Variable before triggering the DAG.
+
+A healthy result includes:
+
+```text
+PASS: Airflow scheduler is active
+PASS: Airflow webserver is active
+PASS: DAG telegram_to_databricks_live_sync is registered
+PASS: Airflow reports no DAG import errors
+```
+
+Airflow CLI commands can print a harmless warning that Python Graphviz is not
+installed. Graphviz is needed only for CLI image rendering; it is not required
+for scheduling, Grid view, logs, Telegram ingestion, or Databricks writes.
+
+You can also run the underlying checks separately:
 
 ```bash
 ./deploy/aws-ec2/airflow-command.sh dags list
-```
-
-Look for:
-
-```text
-telegram_to_databricks_live_sync
-```
-
-Check import errors:
-
-```bash
 ./deploy/aws-ec2/airflow-command.sh dags list-import-errors
 ```
 
-Expected result: no import errors.
+`No data found` from `dags list-import-errors` means there are no import errors.
+The terminal may wrap the long DAG ID across multiple display lines; this does
+not change the registered ID.
 
 If the DAG is missing, inspect scheduler logs:
 
@@ -777,7 +1047,7 @@ sudo systemctl list-timers telehitch-airflow-backup.timer
 find ~/airflow/backups -maxdepth 1 -type f -ls
 ```
 
-The helper retains 14 days of local SQLite backups.
+The helper creates a PostgreSQL custom-format dump and retains 14 days of local metadata backups.
 
 ### Verify service restart after reboot
 
@@ -852,3 +1122,43 @@ swapon --show
 ./deploy/aws-ec2/backup-airflow.sh
 find ~/airflow/backups -maxdepth 1 -type f -ls
 ```
+
+### Scheduler repeatedly restarts with `No such file or directory: 'airflow'`
+
+If **Browse → Jobs** shows repeated failed scheduler jobs and the scheduler log ends
+with:
+
+```text
+FileNotFoundError: [Errno 2] No such file or directory: 'airflow'
+```
+
+Airflow's executor is trying to start a child `airflow` command, but the systemd
+service does not have the virtual environment's `bin` directory in `PATH`. This
+is a service-environment problem, not a Telegram, Databricks, or memory error.
+
+Pull the current repository version and reinstall the generated service units:
+
+```bash
+cd ~/sgjb-telehitch-insights
+git pull --ff-only origin main
+./deploy/aws-ec2/install.sh
+./deploy/aws-ec2/verify-install.sh
+```
+
+The current unit explicitly sets:
+
+```text
+PATH=/home/ubuntu/airflow-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+After reinstalling, verify that the restart count stops increasing:
+
+```bash
+systemctl show telehitch-airflow-scheduler.service -p NRestarts
+sleep 30
+systemctl show telehitch-airflow-scheduler.service -p NRestarts
+```
+
+The two values should be equal. Existing failed scheduler-job rows can remain in
+Airflow history; they do not need to be deleted. Keep the DAG paused until the
+scheduler remains healthy and one manual run succeeds.
