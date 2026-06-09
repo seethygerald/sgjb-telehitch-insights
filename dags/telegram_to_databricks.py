@@ -48,10 +48,28 @@ def _channel_state() -> dict[str, dict[str, int | bool]]:
     try:
         state = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Airflow Variable {CHANNEL_STATE_VARIABLE} must be valid JSON") from exc
+        raise ValueError(
+            f"Airflow Variable {CHANNEL_STATE_VARIABLE} must be valid JSON"
+        ) from exc
     if not isinstance(state, dict):
-        raise ValueError(f"Airflow Variable {CHANNEL_STATE_VARIABLE} must contain a JSON object")
+        raise ValueError(
+            f"Airflow Variable {CHANNEL_STATE_VARIABLE} must contain a JSON object"
+        )
     return state
+
+
+def _save_source_state(
+    state: dict[str, dict[str, int | bool]],
+    state_key: str,
+    *,
+    last_message_id: int,
+    initial_backfill_complete: bool,
+) -> None:
+    state[state_key] = {
+        "last_message_id": last_message_id,
+        "initial_backfill_complete": initial_backfill_complete,
+    }
+    Variable.set(CHANNEL_STATE_VARIABLE, json.dumps(state, sort_keys=True))
 
 
 @dag(
@@ -74,6 +92,7 @@ def telegram_to_databricks_live_sync():
         _load_secret_environment()
         sources = telegram_sources_from_env()
         state = _channel_state()
+        LOGGER.info("Using Airflow Variable checkpoint state")
         per_run_limit = _int_env("TELEGRAM_PER_RUN_LIMIT", 0)
         backfill_page_limit = _int_env(
             "TELEGRAM_BACKFILL_PAGE_LIMIT", DEFAULT_BACKFILL_PAGE_LIMIT
@@ -111,11 +130,12 @@ def telegram_to_databricks_live_sync():
                 initial_backfill_complete=backfill_complete,
                 limit_reached=bool(result.get("limit_reached")),
             )
-            state[source.state_key] = {
-                "last_message_id": next_message_id,
-                "initial_backfill_complete": source_backfill_complete,
-            }
-            Variable.set(CHANNEL_STATE_VARIABLE, json.dumps(state, sort_keys=True))
+            _save_source_state(
+                state,
+                source.state_key,
+                last_message_id=next_message_id,
+                initial_backfill_complete=source_backfill_complete,
+            )
             result["sync_mode"] = sync_mode
             channel_results.append(result)
 

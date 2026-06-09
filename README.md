@@ -124,7 +124,7 @@ airflow-variables-databricks_token
 
 ## Airflow state
 
-The DAG uses one JSON Airflow Variable:
+Persistent Composer and VM deployments use one JSON Airflow Variable:
 
 ```text
 telegram_scraper_channel_state
@@ -148,6 +148,7 @@ A new deployment may leave it absent; the DAG treats that as `{}`. After success
 Do not manually edit this state during normal operation. During a large source's initial backfill, you may see `initial_backfill_complete: false` with a nonzero `last_message_id`; that means the DAG has successfully merged part of the history and will continue from that ID on the next run or retry. To restart completely, pause the DAG, drop the destination table, delete this Airflow Variable (or set it to `{}`), and trigger one run.
 
 The older variables `telegram_scraper_last_message_id` and `telegram_scraper_initial_backfill_complete` are not used by this clean-deployment version.
+
 
 ## Local Telegram StringSession helper
 
@@ -181,16 +182,14 @@ Manual execution processes one channel and does not maintain Airflow's per-chann
 python -m pytest -q
 ```
 
-## Oracle Always Free VM deployment
 
-For a lower-cost self-managed alternative to Cloud Composer, this repository includes a Docker Compose deployment for a single Oracle Cloud Ubuntu VM:
+## AWS EC2 persistent Airflow deployment
 
-```text
-deploy/oracle-vm/
-  Dockerfile
-  compose.yaml
-  airflow.env.example
-  README.md
-```
+For a continuously running Airflow scheduler and web UI on Ubuntu EC2, use
+`deploy/aws-ec2/`. It installs Airflow 2.10.5 in a Python virtual environment
+with SQLite, `SequentialExecutor`, systemd-managed scheduler and webserver
+services, daily metadata backups, optional swap creation for small instances,
+and private UI access through an SSH tunnel.
 
-Use the Oracle deployment README for the full migration steps. The same dynamic source configuration works there: add `TELEGRAM_CHANNEL_4`, `TELEGRAM_CHANNEL_5`, and so on up to `TELEGRAM_CHANNEL_100`, recreate the Airflow services, and the new source will begin its own paged historical backfill while existing sources remain incremental.
+See `deploy/aws-ec2/README.md` for the complete first-time AWS account, EC2,
+Airflow, Telegram, Databricks, and DAG deployment procedure.

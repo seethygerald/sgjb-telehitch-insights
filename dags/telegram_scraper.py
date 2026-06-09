@@ -373,6 +373,7 @@ def ensure_table(cursor, table_name: str) -> None:
         )
 
 
+
 def _merge_statement(table_name: str, values_sql: str) -> str:
     return f"""
         MERGE INTO {table_name} AS target

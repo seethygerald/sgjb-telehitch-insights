@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up the Telehitch Airflow SQLite metadata database
+
+[Service]
+Type=oneshot
+User=__AIRFLOW_USER__
+Group=__AIRFLOW_GROUP__
+Environment=HOME=__AIRFLOW_HOME_DIR__
+WorkingDirectory=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/deploy/aws-ec2/backup-airflow.sh
