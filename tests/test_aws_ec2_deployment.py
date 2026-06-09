@@ -175,5 +175,9 @@ def test_ec2_resource_monitor_captures_task_capacity_signals():
     assert "telehitch-airflow-scheduler.service" in monitor
     assert "postgres_rss_mib" in monitor
     assert "out of memory|oom-kill|killed process" in monitor
+    assert "sudo -n true" in monitor
+    assert "OOM check skipped" in monitor
+    assert "sudo -v" not in monitor
+    assert "never prompts for a sudo password" in guide
     assert "monitor-resources.sh 3600 5" in guide
     assert "CPUCreditBalance" in guide

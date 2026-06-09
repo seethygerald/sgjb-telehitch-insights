@@ -117,10 +117,24 @@ END {
 }' "${OUTPUT_FILE}"
 
 printf '\nKernel OOM evidence since monitoring began:\n'
-if sudo journalctl -k --since "@${start_epoch}" --no-pager | grep -Ei 'out of memory|oom-kill|killed process'; then
-  echo "WARNING: the kernel reported an out-of-memory event."
+oom_pattern='out of memory|oom-kill|killed process'
+if sudo -n true 2>/dev/null; then
+  if sudo -n journalctl -k --since "@${start_epoch}" --no-pager | grep -Eiq "${oom_pattern}"; then
+    sudo -n journalctl -k --since "@${start_epoch}" --no-pager | grep -Ei "${oom_pattern}" || true
+    echo "WARNING: the kernel reported an out-of-memory event."
+  else
+    echo "No kernel OOM events found."
+  fi
+elif journalctl -k --since "@${start_epoch}" --no-pager >/dev/null 2>&1; then
+  if journalctl -k --since "@${start_epoch}" --no-pager | grep -Eiq "${oom_pattern}"; then
+    journalctl -k --since "@${start_epoch}" --no-pager | grep -Ei "${oom_pattern}" || true
+    echo "WARNING: the kernel reported an out-of-memory event."
+  else
+    echo "No kernel OOM events found."
+  fi
 else
-  echo "No kernel OOM events found."
+  echo "OOM check skipped: kernel logs require sudo, and passwordless sudo is unavailable."
+  echo "RAM, swap, CPU, load, and process-memory samples were still recorded successfully."
 fi
 
 printf '\nDetailed samples: %s\n' "${OUTPUT_FILE}"

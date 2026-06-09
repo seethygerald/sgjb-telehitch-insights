@@ -1087,8 +1087,10 @@ cd ~/sgjb-telehitch-insights
 The first argument is the monitoring duration in seconds and the second is the
 sampling interval. The helper records total available RAM, swap use, CPU, load,
 the scheduler and webserver cgroups, PostgreSQL RSS, and all Airflow process RSS.
-It prints peak values and checks kernel logs for OOM kills. Detailed samples are
-stored in a protected CSV under `~/airflow/`.
+It prints peak values and checks kernel logs for OOM kills when kernel logs are
+readable. It never prompts for a sudo password: if passwordless sudo and direct
+journal access are both unavailable, only the OOM-log check is skipped. Detailed
+samples are still stored in a protected CSV under `~/airflow/`.
 
 For a 1 GiB `t3.micro`, keep it only after several representative runs if there
 are no OOM events or service restarts, minimum available RAM normally remains
