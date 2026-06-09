@@ -12,3 +12,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+
+# AWS EC2 native Airflow deployment secrets and temporary state exports.
+deploy/aws-ec2/airflow.env
+deploy/aws-ec2/channel-state.json
