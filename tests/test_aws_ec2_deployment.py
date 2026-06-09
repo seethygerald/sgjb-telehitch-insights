@@ -54,19 +54,24 @@ def test_ec2_secret_and_state_files_are_gitignored():
     assert "deploy/aws-ec2/channel-state.json" in gitignore
 
 
-def test_ec2_readme_is_first_time_setup_only():
-    guide = (DEPLOY / "README.md").read_text()
+def test_root_readme_is_single_first_time_setup_guide():
+    guide = (ROOT / "README.md").read_text()
 
     assert "## Phase 1: create an AWS account" in guide
     assert "## Phase 15: enable the 15-minute schedule" in guide
-    assert "Migration from Google Cloud Composer" not in guide
+    assert "single setup guide" in guide
+    assert "clean, first-time deployment" in guide
+    assert "migration procedures are intentionally outside this guide" in guide
+    assert "Cloud Composer" not in guide
+    assert "Oracle" not in guide
     assert "import the existing Composer checkpoint" not in guide
+    assert not (DEPLOY / "README.md").exists()
 
 
-def test_ec2_readme_uses_plain_ubuntu_and_locked_down_small_instance():
-    guide = (DEPLOY / "README.md").read_text()
+def test_root_readme_uses_plain_ubuntu_and_locked_down_small_instance():
+    guide = (ROOT / "README.md").read_text()
 
-    assert "Instance type | `t3.small`" in guide
+    assert "Instance type | `t3.micro`" in guide
     assert "Ubuntu Server 24.04 LTS (HVM), SSD Volume Type" in guide
     assert "Do not select Ubuntu Server 26.04" in guide
     assert "Do not select an image containing **SQL Server**" in guide
@@ -86,7 +91,7 @@ def test_ec2_readme_uses_plain_ubuntu_and_locked_down_small_instance():
 
 
 def test_ec2_ssh_helper_and_publickey_recovery_are_documented():
-    guide = (DEPLOY / "README.md").read_text()
+    guide = (ROOT / "README.md").read_text()
     helper = (DEPLOY / "check-ssh.sh").read_text()
 
     assert "If SSH says `Permission denied (publickey)`" in guide
@@ -104,7 +109,7 @@ def test_ec2_ssh_helper_and_publickey_recovery_are_documented():
 def test_ec2_verification_helper_checks_runtime_health():
     helper_path = DEPLOY / "verify-install.sh"
     helper = helper_path.read_text()
-    guide = (DEPLOY / "README.md").read_text()
+    guide = (ROOT / "README.md").read_text()
 
     assert helper_path.stat().st_mode & 0o111
     assert "telehitch-airflow-scheduler.service" in helper
@@ -151,12 +156,24 @@ def test_ec2_postgres_backup_and_sqlite_migration_helpers():
     assert "airflow.env" in recovery
 
 
-def test_ec2_scheduler_path_failure_is_documented():
-    guide = (DEPLOY / "README.md").read_text()
+def test_ec2_scheduler_runtime_includes_virtualenv_path():
     installer = (DEPLOY / "install.sh").read_text()
 
-    assert "No such file or directory: 'airflow'" in guide
-    assert "FileNotFoundError" in guide
-    assert "service-environment problem" in guide
-    assert "NRestarts" in guide
     assert "PATH=${VENV_ROOT}/bin:" in installer
+
+
+def test_ec2_resource_monitor_captures_task_capacity_signals():
+    monitor_path = DEPLOY / "monitor-resources.sh"
+    monitor = monitor_path.read_text()
+    guide = (ROOT / "README.md").read_text()
+
+    assert monitor_path.stat().st_mode & 0o111
+    assert "mem_available_mib" in monitor
+    assert "swap_used_mib" in monitor
+    assert "cpu_used_percent" in monitor
+    assert "MemoryCurrent" in monitor
+    assert "telehitch-airflow-scheduler.service" in monitor
+    assert "postgres_rss_mib" in monitor
+    assert "out of memory|oom-kill|killed process" in monitor
+    assert "monitor-resources.sh 3600 5" in guide
+    assert "CPUCreditBalance" in guide
