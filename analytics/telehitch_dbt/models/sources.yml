@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: telegram_bronze
+    description: Existing raw Telegram Delta table maintained by Airflow. dbt reads this table but never modifies it.
+    database: "{{ var('raw_catalog') }}"
+    schema: "{{ var('raw_schema') }}"
+    quoting:
+      database: true
+      schema: true
+      identifier: true
+    tables:
+      - name: messages
+        identifier: "{{ var('raw_table') }}"
+        columns:
+          - name: channel
+            data_tests: [not_null]
+          - name: id
+            data_tests: [not_null]
+          - name: scraped_at_gmt8
+            data_tests: [not_null]

@@ -1,0 +1,23 @@
+name: telehitch_analytics
+version: 1.0.0
+config-version: 2
+
+profile: telehitch_analytics
+
+model-paths: ["models"]
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Change these three values to the exact name of the existing raw table.
+  raw_catalog: workspace
+  raw_schema: default
+  raw_table: sgjb-telehitch-raw
+
+  # Re-read recent raw rows so late updates are merged into Silver.
+  incremental_lookback_days: 2
+
+models:
+  telehitch_analytics:
+    +materialized: incremental
+    +incremental_strategy: merge
+    +file_format: delta
