@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: silver_telehitch_requests
+    description: Cleaned Telegram driver and hitcher requests. The Airflow-managed raw table is read-only.
+    columns:
+      - name: channel
+        data_tests: [not_null]
+      - name: message_id
+        data_tests: [not_null]
+      - name: request_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [driver_request, hitcher_request]
+      - name: pax_count
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+              config:
+                where: "pax_count is not null"
