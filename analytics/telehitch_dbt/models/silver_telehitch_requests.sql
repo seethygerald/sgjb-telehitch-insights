@@ -19,7 +19,7 @@ with raw_messages as (
         row_number() over (
             partition by channel, id
             order by scraped_at_gmt8 desc
-        ) as latest_row
+        ) as scrape_recency_rank
     from {{ source('telegram_bronze', 'messages') }}
     where message is not null
 
@@ -40,15 +40,43 @@ requests_only as (
         case
             when regexp_like(
                 message_lower,
-                r'^driver\s+looking\s+for\s+hitcher(?:\(s\)|s)?(?:\s|:|$)'
+                r'\bdrivers?\s+looking\s+(?:for\s+)?(?:hitchers?|passengers?)\b'
+            ) or regexp_like(
+                message_lower,
+                r'\blooking\s+for\s+passengers?\b'
+            ) or (
+                regexp_like(
+                    message_lower,
+                    r'(?:接送服务|\bwhole\s+car\b|\b[5-9]\s*seater\b)'
+                )
+                and regexp_like(
+                    message_lower,
+                    r'\b(?:pick\s*up|pickup)\b'
+                )
+                and regexp_like(
+                    message_lower,
+                    r'\b(?:drop\s*off|dropoff|drop)\b'
+                )
             ) then 'driver_request'
             when regexp_like(
                 message_lower,
-                r'^hitcher(?:\(s\)|s)?\s+looking\s+for\s+driver(?:\(s\)|s)?(?:\s|:|$)'
+                r'\bhitchers?\s+looking\s+(?:for\s+)?drivers?\b'
+            ) or regexp_like(
+                message_lower,
+                r'\blooking\s+for\s+drivers?\b'
+            ) or (
+                regexp_like(
+                    message_lower,
+                    r'\b(?:pick\s*up|pickup)\b'
+                )
+                and regexp_like(
+                    message_lower,
+                    r'\b(?:drop\s*off|dropoff|drop)\b'
+                )
             ) then 'hitcher_request'
         end as request_type
     from raw_messages
-    where latest_row = 1
+    where scrape_recency_rank = 1
 ),
 
 extracted as (
