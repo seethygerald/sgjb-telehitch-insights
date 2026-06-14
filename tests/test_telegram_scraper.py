@@ -3,10 +3,32 @@ import importlib.util
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _install_external_client_test_doubles():
+    """Allow unit tests to import the scraper without optional runtime clients."""
+    if importlib.util.find_spec("databricks") is None:
+        databricks_module = ModuleType("databricks")
+        databricks_sql_module = ModuleType("databricks.sql")
+        databricks_sql_module.connect = MagicMock()
+        databricks_module.sql = databricks_sql_module
+        sys.modules["databricks"] = databricks_module
+        sys.modules["databricks.sql"] = databricks_sql_module
+
+    if importlib.util.find_spec("telethon") is None:
+        telethon_module = ModuleType("telethon")
+        telethon_sessions_module = ModuleType("telethon.sessions")
+        telethon_module.TelegramClient = MagicMock()
+        telethon_sessions_module.StringSession = MagicMock()
+        sys.modules["telethon"] = telethon_module
+        sys.modules["telethon.sessions"] = telethon_sessions_module
+
+
+_install_external_client_test_doubles()
 
 MODULE_PATH = Path(__file__).parents[1] / "dags" / "telegram_scraper.py"
 SPEC = importlib.util.spec_from_file_location("telegram_scraper", MODULE_PATH)
