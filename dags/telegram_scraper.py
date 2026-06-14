@@ -24,7 +24,7 @@ from telethon.sessions import StringSession
 DEFAULT_CHANNEL = "CarpoolSgJb"
 DEFAULT_TABLE = "telegram_messages"
 DEFAULT_BATCH_SIZE = 100
-DEFAULT_BACKFILL_PAGE_LIMIT = 1000
+DEFAULT_BACKFILL_PAGE_LIMIT = 0
 DEFAULT_CSV_OUTPUT = "telegram_messages_incremental.csv"
 GMT_PLUS_8 = timezone(timedelta(hours=8), name="GMT+8")
 MAX_TELEGRAM_CHANNELS = 100
@@ -41,6 +41,12 @@ EXPECTED_TABLE_COLUMNS = {
 }
 
 
+def canonical_channel_name(channel: str) -> str:
+    """Return the stable channel identifier persisted in Databricks and state."""
+
+    return channel.strip().lstrip("@").casefold()
+
+
 @dataclass(frozen=True)
 class TelegramSource:
     """A Telegram channel or one topic/thread inside that channel."""
@@ -50,7 +56,7 @@ class TelegramSource:
 
     @property
     def state_key(self) -> str:
-        normalized_channel = self.channel.lstrip("@").casefold()
+        normalized_channel = canonical_channel_name(self.channel)
         if self.topic_id is None:
             return normalized_channel
         return f"{normalized_channel}#topic={self.topic_id}"
@@ -250,22 +256,22 @@ def message_limit_for_run(
     per_run_limit: int,
     backfill_page_limit: int = DEFAULT_BACKFILL_PAGE_LIMIT,
 ) -> tuple[str, int | None]:
-    """Choose paged full-history backfills and incremental later runs.
+    """Choose full-history backfills and incremental later runs.
 
-    New sources are backfilled in bounded pages so a very large Telegram history
-    does not have to fit in one Airflow worker attempt. The DAG keeps
-    ``initial_backfill_complete`` false until a page returns fewer messages than
-    ``backfill_page_limit``.
+    A zero ``backfill_page_limit`` means that a new source fetches all available
+    Telegram history in its first run. A positive value enables bounded pages.
+    Incremental runs use ``per_run_limit`` with the same zero-means-unlimited
+    convention.
     """
 
     if last_message_id < 0:
         raise ValueError("last_message_id must be zero or greater")
     if per_run_limit < 0:
         raise ValueError("TELEGRAM_PER_RUN_LIMIT must be zero or greater")
-    if backfill_page_limit <= 0:
-        raise ValueError("TELEGRAM_BACKFILL_PAGE_LIMIT must be greater than zero")
+    if backfill_page_limit < 0:
+        raise ValueError("TELEGRAM_BACKFILL_PAGE_LIMIT must be zero or greater")
     if not initial_backfill_complete:
-        return "full_history", backfill_page_limit
+        return "full_history", backfill_page_limit or None
     return "incremental", per_run_limit or None
 
 
@@ -319,7 +325,7 @@ async def fetch_new_messages(
             messages.append(
                 TelegramMessage(
                     id=msg.id,
-                    channel=config.channel,
+                    channel=canonical_channel_name(config.channel),
                     topic_id=config.topic_id,
                     message_date_gmt8=message_date_gmt8,
                     message=msg.message,
