@@ -24,13 +24,8 @@ with raw_messages as (
     where message is not null
 
     {% if is_incremental() %}
-      and scraped_at_gmt8 >= (
-          select coalesce(
-              max(scraped_at_gmt8) - interval {{ var('incremental_lookback_days') }} days,
-              cast('1900-01-01' as timestamp)
-          )
-          from {{ this }}
-      )
+      and scraped_at_gmt8 >=
+          current_timestamp() - interval {{ var('incremental_lookback_hours') }} hours
     {% endif %}
 ),
 

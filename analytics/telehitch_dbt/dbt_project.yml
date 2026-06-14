@@ -13,8 +13,9 @@ vars:
   raw_schema: default
   raw_table: sgjb-telehitch-raw
 
-  # Re-read recent raw rows so late updates are merged into Silver.
-  incremental_lookback_days: 2
+  # The first run reads all Bronze history. Later runs re-read only the latest
+  # six hours so recent edits or delayed rows can still be merged into Silver.
+  incremental_lookback_hours: 6
 
 models:
   telehitch_analytics:

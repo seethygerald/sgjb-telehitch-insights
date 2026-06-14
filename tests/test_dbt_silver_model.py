@@ -94,3 +94,16 @@ def test_silver_model_reads_the_declared_bronze_source():
     assert "raw_catalog: workspace" in project
     assert "raw_schema: default" in project
     assert "raw_table: sgjb-telehitch-raw" in project
+
+
+def test_silver_model_uses_a_six_hour_incremental_lookback():
+    model = SILVER_MODEL.read_text()
+    project = (DBT_PROJECT / "dbt_project.yml").read_text()
+
+    assert "incremental_lookback_hours: 6" in project
+    assert "var('incremental_lookback_hours')" in model
+    assert "current_timestamp() - interval" in model
+    assert "hours" in model
+    assert "max(scraped_at_gmt8)" not in model
+    assert "incremental_lookback_days" not in project
+    assert "incremental_lookback_days" not in model
