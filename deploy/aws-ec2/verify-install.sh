@@ -72,6 +72,27 @@ else
   fail "Airflow reports one or more DAG import errors"
 fi
 
+if PYTHONPATH="${REPO_ROOT}/dags" "${HOME}/airflow-venv/bin/python" - <<'PY'
+from telegram_scraper import message_limit_for_run
+
+raise SystemExit(
+    0
+    if message_limit_for_run(
+        last_message_id=0,
+        initial_backfill_complete=False,
+        per_run_limit=0,
+        backfill_page_limit=0,
+    )
+    == ("full_history", None)
+    else 1
+)
+PY
+then
+  pass "Scraper supports unlimited initial backfills when TELEGRAM_BACKFILL_PAGE_LIMIT=0"
+else
+  fail "Scraper is stale and still rejects TELEGRAM_BACKFILL_PAGE_LIMIT=0; run deploy/aws-ec2/update.sh"
+fi
+
 if "$AIRFLOW_COMMAND" variables get "$STATE_VARIABLE" >/dev/null 2>&1; then
   pass "Checkpoint variable ${STATE_VARIABLE} exists"
 else
