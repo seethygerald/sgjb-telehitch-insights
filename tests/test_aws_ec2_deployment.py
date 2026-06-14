@@ -11,7 +11,7 @@ def test_ec2_environment_uses_direct_airflow_config_and_low_memory_limits():
 
     assert "AIRFLOW__WEBSERVER__SECRET_KEY=" in environment
     assert "AIRFLOW__CORE__FERNET_KEY=" in environment
-    assert "TELEGRAM_BACKFILL_PAGE_LIMIT=100" in environment
+    assert "TELEGRAM_BACKFILL_PAGE_LIMIT=0" in environment
     assert "DATABRICKS_BATCH_SIZE=50" in environment
     assert "AIRFLOW__CORE__EXECUTOR=LocalExecutor" in installer
     assert "postgresql+psycopg2://airflow:" in installer
@@ -144,6 +144,8 @@ def test_ec2_postgres_backup_and_sqlite_migration_helpers():
     assert '"${DEPLOY_DIR}/install.sh"' in migration
     assert '"${DEPLOY_DIR}/import-channel-state.sh"' in migration
     assert "migrate-metadata-to-postgres.sh" in updater
+    assert "Verified zero-means-unlimited initial backfill behavior." in updater
+    assert "backfill_page_limit=0" in updater
     assert "an empty state will be imported" not in migration
     assert "Migration stopped before changing metadata" in migration
 
@@ -161,6 +163,17 @@ def test_ec2_scheduler_runtime_includes_virtualenv_path():
     installer = (DEPLOY / "install.sh").read_text()
 
     assert "PATH=${VENV_ROOT}/bin:" in installer
+
+
+def test_ec2_verifier_detects_a_stale_backfill_implementation():
+    verifier = (DEPLOY / "verify-install.sh").read_text()
+
+    assert "--allow-stopped-scheduler" in verifier
+    assert "intentionally allowed to be stopped for maintenance" in verifier
+    assert "backfill_page_limit=0" in verifier
+    assert '== ("full_history", None)' in verifier
+    assert "Scraper supports unlimited initial backfills" in verifier
+    assert "Scraper is stale" in verifier
 
 
 def test_ec2_resource_monitor_captures_task_capacity_signals():
