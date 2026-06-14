@@ -5,6 +5,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AIRFLOW_COMMAND="${REPO_ROOT}/deploy/aws-ec2/airflow-command.sh"
 DAG_ID="telegram_to_databricks_live_sync"
 STATE_VARIABLE="telegram_scraper_channel_state"
+ALLOW_STOPPED_SCHEDULER=false
+
+if [[ "${1:-}" == "--allow-stopped-scheduler" ]]; then
+  ALLOW_STOPPED_SCHEDULER=true
+  shift
+fi
+if (( $# > 0 )); then
+  printf 'Usage: %s [--allow-stopped-scheduler]\n' "$0" >&2
+  exit 2
+fi
 
 pass() { printf 'PASS: %s\n' "$1"; }
 warn() { printf 'WARN: %s\n' "$1" >&2; }
@@ -21,7 +31,14 @@ check_service() {
   fi
 }
 
-check_service telehitch-airflow-scheduler.service "Airflow scheduler"
+if sudo systemctl is-active --quiet telehitch-airflow-scheduler.service; then
+  pass "Airflow scheduler is active"
+elif [[ "${ALLOW_STOPPED_SCHEDULER}" == true ]]; then
+  warn "Airflow scheduler is intentionally allowed to be stopped for maintenance"
+else
+  sudo systemctl status telehitch-airflow-scheduler.service --no-pager >&2 || true
+  fail "Airflow scheduler is not active"
+fi
 check_service telehitch-airflow-webserver.service "Airflow webserver"
 
 scheduler_path="$(sudo systemctl show telehitch-airflow-scheduler.service --property=Environment --value)"

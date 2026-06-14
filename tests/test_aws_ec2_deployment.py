@@ -168,6 +168,8 @@ def test_ec2_scheduler_runtime_includes_virtualenv_path():
 def test_ec2_verifier_detects_a_stale_backfill_implementation():
     verifier = (DEPLOY / "verify-install.sh").read_text()
 
+    assert "--allow-stopped-scheduler" in verifier
+    assert "intentionally allowed to be stopped for maintenance" in verifier
     assert "backfill_page_limit=0" in verifier
     assert '== ("full_history", None)' in verifier
     assert "Scraper supports unlimited initial backfills" in verifier
