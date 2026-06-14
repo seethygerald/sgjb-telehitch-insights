@@ -24,6 +24,12 @@ def classify_request(message):
     has_pickup = re.search(r"\b(?:pick\s*up|pickup)\b", message)
     has_dropoff = re.search(r"\b(?:drop\s*off|dropoff|drop)\b", message)
 
+    if re.search(
+        r"^(?:bikers?\s+looking\s+(?:for\s+)?pillions?|pillions?\s+looking\s+(?:for\s+)?bikers?)\b",
+        message,
+    ):
+        return "noise"
+
     if (
         re.search(
             r"\bdrivers?\s+looking\s+(?:for\s+)?(?:hitchers?|passengers?)\b",
@@ -67,6 +73,13 @@ def test_silver_model_classifies_real_message_variants():
             "🚙接送服务 Pick up: SG /JB Drop off: SG /JB 🚘 5 seater Whole car",
             "driver_request",
         ),
+        (
+            "Biker looking for Pillion 🛵\n\nPick up;-East\nDrop Off: Anywhere\nTime: Now",
+            "noise",
+        ),
+        ("Bikers looking for Pillions\nPickup: East\nDropoff: West", "noise"),
+        ("Pillion looking for Biker\nPickup: East\nDropoff: West", "noise"),
+        ("Pillions looking for Bikers\nPickup: East\nDropoff: West", "noise"),
         ("Someone mentioned a driver and hitcher", "noise"),
     ]
 
@@ -107,3 +120,20 @@ def test_silver_model_uses_a_six_hour_incremental_lookback():
     assert "max(scraped_at_gmt8)" not in model
     assert "incremental_lookback_days" not in project
     assert "incremental_lookback_days" not in model
+
+
+def test_silver_model_excludes_biker_pillion_requests():
+    model = SILVER_MODEL.read_text()
+
+    assert (
+        r"^(?:bikers?\s+looking\s+(?:for\s+)?pillions?|"
+        r"pillions?\s+looking\s+(?:for\s+)?bikers?)\b"
+    ) in model
+    assert ") then null" in model
+
+
+def test_silver_model_replaces_now_with_the_message_timestamp():
+    model = SILVER_MODEL.read_text()
+
+    assert "when lower(trim(request_time_text)) = 'now'" in model
+    assert "then cast(message_date_gmt8 as string)" in model

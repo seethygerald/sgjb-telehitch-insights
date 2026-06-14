@@ -35,6 +35,10 @@ requests_only as (
         case
             when regexp_like(
                 message_lower,
+                r'^(?:bikers?\s+looking\s+(?:for\s+)?pillions?|pillions?\s+looking\s+(?:for\s+)?bikers?)\b'
+            ) then null
+            when regexp_like(
+                message_lower,
                 r'\bdrivers?\s+looking\s+(?:for\s+)?(?:hitchers?|passengers?)\b'
             ) or regexp_like(
                 message_lower,
@@ -132,7 +136,11 @@ cleaned as (
         request_type,
         pickup_location,
         dropoff_location,
-        request_time_text,
+        case
+            when lower(trim(request_time_text)) = 'now'
+                then cast(message_date_gmt8 as string)
+            else request_time_text
+        end as request_time_text,
         case
             when regexp_like(lower(message), r'\bwhole\s+car\b') then null
             when regexp_like(lower(message), r'\bpax\s*:?\s*(?:-|nil|n/?a|tbc)(?:\s|$)') then null
