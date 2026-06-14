@@ -1,0 +1,24 @@
+name: telehitch_analytics
+version: 1.0.0
+config-version: 2
+
+profile: telehitch_analytics
+
+model-paths: ["models"]
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Change these three values to the exact name of the existing raw table.
+  raw_catalog: workspace
+  raw_schema: default
+  raw_table: sgjb-telehitch-raw
+
+  # The first run reads all Bronze history. Later runs re-read only the latest
+  # six hours so recent edits or delayed rows can still be merged into Silver.
+  incremental_lookback_hours: 6
+
+models:
+  telehitch_analytics:
+    +materialized: incremental
+    +incremental_strategy: merge
+    +file_format: delta

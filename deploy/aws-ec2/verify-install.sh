@@ -5,6 +5,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AIRFLOW_COMMAND="${REPO_ROOT}/deploy/aws-ec2/airflow-command.sh"
 DAG_ID="telegram_to_databricks_live_sync"
 STATE_VARIABLE="telegram_scraper_channel_state"
+ALLOW_STOPPED_SCHEDULER=false
+
+if [[ "${1:-}" == "--allow-stopped-scheduler" ]]; then
+  ALLOW_STOPPED_SCHEDULER=true
+  shift
+fi
+if (( $# > 0 )); then
+  printf 'Usage: %s [--allow-stopped-scheduler]\n' "$0" >&2
+  exit 2
+fi
 
 pass() { printf 'PASS: %s\n' "$1"; }
 warn() { printf 'WARN: %s\n' "$1" >&2; }
@@ -21,7 +31,14 @@ check_service() {
   fi
 }
 
-check_service telehitch-airflow-scheduler.service "Airflow scheduler"
+if sudo systemctl is-active --quiet telehitch-airflow-scheduler.service; then
+  pass "Airflow scheduler is active"
+elif [[ "${ALLOW_STOPPED_SCHEDULER}" == true ]]; then
+  warn "Airflow scheduler is intentionally allowed to be stopped for maintenance"
+else
+  sudo systemctl status telehitch-airflow-scheduler.service --no-pager >&2 || true
+  fail "Airflow scheduler is not active"
+fi
 check_service telehitch-airflow-webserver.service "Airflow webserver"
 
 scheduler_path="$(sudo systemctl show telehitch-airflow-scheduler.service --property=Environment --value)"
@@ -70,6 +87,27 @@ if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin) e
 else
   printf '%s\n' "$import_errors" >&2
   fail "Airflow reports one or more DAG import errors"
+fi
+
+if PYTHONPATH="${REPO_ROOT}/dags" "${HOME}/airflow-venv/bin/python" - <<'PY'
+from telegram_scraper import message_limit_for_run
+
+raise SystemExit(
+    0
+    if message_limit_for_run(
+        last_message_id=0,
+        initial_backfill_complete=False,
+        per_run_limit=0,
+        backfill_page_limit=0,
+    )
+    == ("full_history", None)
+    else 1
+)
+PY
+then
+  pass "Scraper supports unlimited initial backfills when TELEGRAM_BACKFILL_PAGE_LIMIT=0"
+else
+  fail "Scraper is stale and still rejects TELEGRAM_BACKFILL_PAGE_LIMIT=0; run deploy/aws-ec2/update.sh"
 fi
 
 if "$AIRFLOW_COMMAND" variables get "$STATE_VARIABLE" >/dev/null 2>&1; then

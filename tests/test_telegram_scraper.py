@@ -64,6 +64,18 @@ def test_source_discovery_pairs_numbered_channel_with_topic_id():
     assert sources[1].label == "TeleHitch (topic 1823745)"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("TeleHitch", "telehitch"),
+        ("Telehitch", "telehitch"),
+        (" @TeleHitch ", "telehitch"),
+    ],
+)
+def test_channel_names_have_one_stable_persisted_form(value, expected):
+    assert telegram_scraper.canonical_channel_name(value) == expected
+
+
 def test_source_discovery_distinguishes_topics_in_the_same_channel():
     sources = telegram_scraper.telegram_sources_from_env(
         {
@@ -171,6 +183,7 @@ def test_fetch_uses_string_session_gets_sender_and_disconnects():
     client.disconnect.assert_awaited_once()
     assert iter_arguments["args"] == ("ChannelOne",)
     assert iter_arguments["kwargs"]["reply_to"] == 1823745
+    assert messages[0].channel == "channelone"
     assert messages[0].topic_id == 1823745
     assert messages[0].sender_handle == "@gerald"
     assert messages[0].message_date_gmt8.isoformat() == "2026-06-07T18:30:00+08:00"
@@ -241,14 +254,14 @@ def test_merge_statement_uses_channel_key_handle_and_gmt8_columns():
     assert "`date`" not in statement
 
 
-def test_initial_backfill_uses_default_page_limit_even_with_nonzero_stale_id():
+def test_initial_backfill_is_unlimited_even_with_nonzero_stale_id():
     mode, limit = telegram_scraper.message_limit_for_run(
         last_message_id=123,
         initial_backfill_complete=False,
         per_run_limit=100,
     )
 
-    assert (mode, limit) == ("full_history", telegram_scraper.DEFAULT_BACKFILL_PAGE_LIMIT)
+    assert (mode, limit) == ("full_history", None)
 
 
 def test_initial_backfill_can_use_custom_page_limit():
@@ -304,7 +317,7 @@ def test_subsequent_run_can_be_unlimited():
     [
         (-1, 0, 1000, "last_message_id"),
         (0, -1, 1000, "TELEGRAM_PER_RUN_LIMIT"),
-        (0, 0, 0, "TELEGRAM_BACKFILL_PAGE_LIMIT"),
+        (0, 0, -1, "TELEGRAM_BACKFILL_PAGE_LIMIT"),
     ],
 )
 def test_message_limit_rejects_invalid_values(
