@@ -41,6 +41,12 @@ EXPECTED_TABLE_COLUMNS = {
 }
 
 
+def canonical_channel_name(channel: str) -> str:
+    """Return the stable channel identifier persisted in Databricks and state."""
+
+    return channel.strip().lstrip("@").casefold()
+
+
 @dataclass(frozen=True)
 class TelegramSource:
     """A Telegram channel or one topic/thread inside that channel."""
@@ -50,7 +56,7 @@ class TelegramSource:
 
     @property
     def state_key(self) -> str:
-        normalized_channel = self.channel.lstrip("@").casefold()
+        normalized_channel = canonical_channel_name(self.channel)
         if self.topic_id is None:
             return normalized_channel
         return f"{normalized_channel}#topic={self.topic_id}"
@@ -319,7 +325,7 @@ async def fetch_new_messages(
             messages.append(
                 TelegramMessage(
                     id=msg.id,
-                    channel=config.channel,
+                    channel=canonical_channel_name(config.channel),
                     topic_id=config.topic_id,
                     message_date_gmt8=message_date_gmt8,
                     message=msg.message,

@@ -86,6 +86,18 @@ def test_source_discovery_pairs_numbered_channel_with_topic_id():
     assert sources[1].label == "TeleHitch (topic 1823745)"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("TeleHitch", "telehitch"),
+        ("Telehitch", "telehitch"),
+        (" @TeleHitch ", "telehitch"),
+    ],
+)
+def test_channel_names_have_one_stable_persisted_form(value, expected):
+    assert telegram_scraper.canonical_channel_name(value) == expected
+
+
 def test_source_discovery_distinguishes_topics_in_the_same_channel():
     sources = telegram_scraper.telegram_sources_from_env(
         {
@@ -193,6 +205,7 @@ def test_fetch_uses_string_session_gets_sender_and_disconnects():
     client.disconnect.assert_awaited_once()
     assert iter_arguments["args"] == ("ChannelOne",)
     assert iter_arguments["kwargs"]["reply_to"] == 1823745
+    assert messages[0].channel == "channelone"
     assert messages[0].topic_id == 1823745
     assert messages[0].sender_handle == "@gerald"
     assert messages[0].message_date_gmt8.isoformat() == "2026-06-07T18:30:00+08:00"
