@@ -155,16 +155,19 @@ selects **Standard** CPU credit mode to avoid surplus CPU-credit charges.
 A successful installation alone does not prove that 1 GiB is sufficient. Phase
 17 measures representative scheduled runs and gives explicit resize criteria.
 
-Use these initial ingestion settings on a micro or small instance:
+Use these ingestion settings when a new source must load all available history
+in its first run:
 
 ```text
-TELEGRAM_BACKFILL_PAGE_LIMIT=100
+TELEGRAM_BACKFILL_PAGE_LIMIT=0
 DATABRICKS_BATCH_SIZE=50
 ```
 
-They keep each historical page and Databricks SQL statement small. After the
-historical backfills complete and the instance is stable, you can increase them
-carefully.
+`TELEGRAM_BACKFILL_PAGE_LIMIT=0` removes the Telegram fetch limit for the
+initial backfill. `DATABRICKS_BATCH_SIZE=50` does not cap the number fetched; it
+only divides the fetched messages into smaller Databricks `MERGE` statements.
+An unlimited backfill holds the fetched source history in worker memory, so
+monitor the instance during the first run.
 
 ---
 
@@ -719,13 +722,13 @@ Use these initial values:
 
 ```text
 TELEGRAM_AIRFLOW_SCHEDULE="*/15 * * * *"
-TELEGRAM_BACKFILL_PAGE_LIMIT=100
+TELEGRAM_BACKFILL_PAGE_LIMIT=0
 TELEGRAM_PER_RUN_LIMIT=0
 ```
 
-- A new source starts with paged historical ingestion.
-- Each successful page saves that source's highest Telegram message ID.
-- After the final historical page, the source switches to incremental ingestion.
+- A new source loads all available historical messages in its first run.
+- The successful run saves that source's highest Telegram message ID.
+- After the historical run, the source switches to incremental ingestion.
 - Existing sources remain incremental when another channel is added later.
 
 ### Databricks configuration

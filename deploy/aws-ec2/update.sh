@@ -19,6 +19,26 @@ fi
   -r requirements.txt \
   --constraint "${constraint_url}"
 "${REPO_ROOT}/deploy/aws-ec2/airflow-command.sh" db migrate
+
+# Refuse to restart Airflow with a stale scraper that still rejects the
+# documented zero-means-unlimited initial backfill setting.
+PYTHONPATH="${REPO_ROOT}/dags" "${VENV_ROOT}/bin/python" - <<'PY'
+from telegram_scraper import message_limit_for_run
+
+mode, limit = message_limit_for_run(
+    last_message_id=0,
+    initial_backfill_complete=False,
+    per_run_limit=0,
+    backfill_page_limit=0,
+)
+if (mode, limit) != ("full_history", None):
+    raise SystemExit(
+        "Updated scraper did not resolve TELEGRAM_BACKFILL_PAGE_LIMIT=0 "
+        "to an unlimited full-history run"
+    )
+print("Verified zero-means-unlimited initial backfill behavior.")
+PY
+
 sudo systemctl restart telehitch-airflow-scheduler.service
 sudo systemctl restart telehitch-airflow-webserver.service
 sudo systemctl --no-pager --full status telehitch-airflow-scheduler.service
