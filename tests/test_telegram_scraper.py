@@ -241,14 +241,14 @@ def test_merge_statement_uses_channel_key_handle_and_gmt8_columns():
     assert "`date`" not in statement
 
 
-def test_initial_backfill_uses_default_page_limit_even_with_nonzero_stale_id():
+def test_initial_backfill_is_unlimited_even_with_nonzero_stale_id():
     mode, limit = telegram_scraper.message_limit_for_run(
         last_message_id=123,
         initial_backfill_complete=False,
         per_run_limit=100,
     )
 
-    assert (mode, limit) == ("full_history", telegram_scraper.DEFAULT_BACKFILL_PAGE_LIMIT)
+    assert (mode, limit) == ("full_history", None)
 
 
 def test_initial_backfill_can_use_custom_page_limit():
@@ -304,7 +304,7 @@ def test_subsequent_run_can_be_unlimited():
     [
         (-1, 0, 1000, "last_message_id"),
         (0, -1, 1000, "TELEGRAM_PER_RUN_LIMIT"),
-        (0, 0, 0, "TELEGRAM_BACKFILL_PAGE_LIMIT"),
+        (0, 0, -1, "TELEGRAM_BACKFILL_PAGE_LIMIT"),
     ],
 )
 def test_message_limit_rejects_invalid_values(
