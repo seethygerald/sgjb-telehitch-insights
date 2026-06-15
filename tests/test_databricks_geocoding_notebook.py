@@ -28,17 +28,34 @@ def test_geocoding_notebook_reads_silver_without_modifying_it():
     assert "DELETE FROM {REQUESTS_TABLE}" not in notebook
 
 
-def test_geocoding_notebook_is_bounded_and_incremental():
+def test_geocoding_notebook_is_unlimited_by_default_and_incremental():
     notebook = notebook_text()
 
-    assert '"max_locations_per_run", "100"' in notebook
-    assert "LIMIT {MAX_LOCATIONS_PER_RUN}" in notebook
+    assert '"max_locations_per_run",' in notebook
+    assert '"0",' in notebook
+    assert "location_limit_clause = (" in notebook
+    assert "if MAX_LOCATIONS_PER_RUN > 0" in notebook
+    assert "f\"LIMIT {MAX_LOCATIONS_PER_RUN}\"" in notebook
+    assert "f\"{MAX_LOCATIONS_PER_RUN or 'unlimited'}\"" in notebook
     assert "geocodes.normalized_location IS NULL" in notebook
     assert "geocodes.resolution_status = 'error'" in notebook
     assert "MERGE INTO {GEOCODES_TABLE}" in notebook
     assert (
         "target.normalized_location = source.normalized_location"
         in notebook
+    )
+
+
+def test_selection_and_processing_share_one_databricks_cell():
+    notebook = notebook_text()
+    cells = notebook.split("# COMMAND ----------")
+    processing_cell = next(
+        cell for cell in cells if "locations_to_process = spark.sql" in cell
+    )
+
+    assert "if locations_to_process:" in processing_cell
+    assert processing_cell.index("locations_to_process = spark.sql") < (
+        processing_cell.index("if locations_to_process:")
     )
 
 
@@ -89,6 +106,27 @@ def test_geocoding_notebook_rejects_ambiguous_postal_codes():
     assert 'SINGAPORE_POSTAL_CODE_PATTERN = re.compile(r"^\\d{6}$")' in notebook
     assert 'return None, len(results), "ambiguous"' in notebook
     assert 'return valid_results[0], len(results), "resolved"' in notebook
+
+
+def test_geocoding_notebook_extracts_postal_codes_without_api_calls():
+    notebook = notebook_text()
+
+    assert (
+        'POSTAL_CODE_IN_TEXT_PATTERN = re.compile(r"(?<!\\d)(\\d{6})(?!\\d)")'
+        in notebook
+    )
+    assert "def postal_codes_in_location(value):" in notebook
+    assert "list(dict.fromkeys(" in notebook
+    assert 'postal_code=",".join(postal_codes)' in notebook
+    assert "result_count=len(postal_codes)" in notebook
+    assert "geocodes.postal_code IS NULL" in notebook
+
+    postal_rule_index = notebook.index("if postal_codes:")
+    token_index = notebook.index(
+        "onemap_token = get_onemap_token()",
+        postal_rule_index,
+    )
+    assert postal_rule_index < token_index
 
 
 def test_manual_overrides_are_applied_before_api_selection():
