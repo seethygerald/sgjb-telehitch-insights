@@ -109,6 +109,21 @@ def test_silver_model_reads_the_declared_bronze_source():
     assert "raw_table: sgjb-telehitch-raw" in project
 
 
+def test_declares_notebook_managed_geocode_cache_source():
+    source = (DBT_PROJECT / "models" / "sources.yml").read_text()
+
+    assert "- name: telehitch_silver" in source
+    assert "database: workspace" in source
+    assert "schema: silver" in source
+    assert "- name: location_geocodes" in source
+    assert "identifier: location_geocodes" in source
+    assert "- name: normalized_location" in source
+    assert "- unique" in source
+    assert "values: [resolved, no_match, ambiguous, error]" in source
+    assert "values: [onemap, rule, override]" in source
+    assert "- name: result_count" in source
+
+
 def test_silver_model_uses_a_six_hour_incremental_lookback():
     model = SILVER_MODEL.read_text()
     project = (DBT_PROJECT / "dbt_project.yml").read_text()
