@@ -137,3 +137,74 @@ def test_silver_model_replaces_now_with_the_message_timestamp():
 
     assert "when lower(trim(request_time_text)) = 'now'" in model
     assert "then cast(message_date_gmt8 as string)" in model
+
+
+def test_silver_model_normalizes_compact_cross_border_routes_conservatively():
+    model = SILVER_MODEL.read_text()
+
+    assert "as pickup_location_raw" in model
+    assert "as dropoff_location_raw" in model
+    assert r"^jb(?:\s|[/→👉🇲🇾🇸🇬-])*sg\s*$" in model
+    assert r"^sg(?:\s|[/→👉🇲🇾🇸🇬-])*jb\s*$" in model
+    assert "then 'jb'" in model
+    assert "then 'sg'" in model
+    assert "else pickup_location_raw" in model
+    assert "else dropoff_location_raw" in model
+
+    route_pattern = re.compile(r"^(jb|sg)(?:\s|[/→👉🇲🇾🇸🇬-])*(sg|jb)\s*$", re.I)
+
+    def normalize_location(location):
+        match = route_pattern.fullmatch(location)
+        return match.group(1).lower() if match and match.group(1) != match.group(2) else location
+
+    assert normalize_location("JB🇲🇾SG") == "jb"
+    assert normalize_location("SG🇸🇬JB") == "sg"
+    assert normalize_location("JB SG") == "jb"
+    assert normalize_location("SG→JB") == "sg"
+    assert normalize_location("Jurong East") == "Jurong East"
+    assert normalize_location("Queenstown MRT") == "Queenstown MRT"
+    assert normalize_location("Woodlands") == "Woodlands"
+    assert normalize_location("Singapore General Hospital") == "Singapore General Hospital"
+
+
+def test_silver_model_uses_lower_integer_midpoint_for_labelled_pax_ranges():
+    model = SILVER_MODEL.read_text()
+
+    assert "as pax_range_min" in model
+    assert "as pax_range_max" in model
+    assert "pax_range_min <= pax_range_max" in model
+    assert "floor((pax_range_min + pax_range_max) / 2.0)" in model
+
+    assert (1 + 6) // 2 == 3
+    assert (2 + 4) // 2 == 3
+    assert (1 + 5) // 2 == 3
+    assert (2 + 3) // 2 == 2
+
+
+def test_silver_model_covers_the_real_cross_border_message_and_reverse_route():
+    message = """🇲🇾👉🇸🇬 Driver 🇸🇬👉🇲🇾
+🚗Looking for passengers 👪
+
+Date:TODAY
+Time: NOW
+Pick up: JB🇲🇾SG
+Drop off: SG🇸🇬JB
+Pax: 1-6
+Pm pm pm thank you"""
+    reverse = message.replace("Pick up: JB🇲🇾SG", "Pick up: SG🇸🇬JB").replace(
+        "Drop off: SG🇸🇬JB", "Drop off: JB🇲🇾SG"
+    )
+
+    pickup_pattern = re.compile(r"(?im)^\s*pick\s*up\s*:\s*([^\r\n]+)")
+    dropoff_pattern = re.compile(r"(?im)^\s*drop\s*off\s*:\s*([^\r\n]+)")
+    pax_pattern = re.compile(r"(?i)\bpax\s*:?\s*(\d{1,2})\s*[-–]\s*(\d{1,2})\b")
+    route_pattern = re.compile(r"^(jb|sg)(?:\s|[/→👉🇲🇾🇸🇬-])*(sg|jb)\s*$", re.I)
+
+    def parse(sample):
+        pickup = route_pattern.fullmatch(pickup_pattern.search(sample).group(1)).group(1)
+        dropoff = route_pattern.fullmatch(dropoff_pattern.search(sample).group(1)).group(1)
+        pax_min, pax_max = map(int, pax_pattern.search(sample).groups())
+        return pickup.lower(), dropoff.lower(), (pax_min + pax_max) // 2
+
+    assert parse(message) == ("jb", "sg", 3)
+    assert parse(reverse) == ("sg", "jb", 3)

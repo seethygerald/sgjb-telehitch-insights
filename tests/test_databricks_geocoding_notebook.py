@@ -46,12 +46,41 @@ def test_geocoding_notebook_uses_secrets_and_never_embeds_credentials():
     notebook = notebook_text()
 
     assert "dbutils.secrets.get" in notebook
+    assert "WorkspaceClient().secrets.put_secret" in notebook
     assert '"access-token"' in notebook
     assert '"email"' in notebook
     assert '"password"' in notebook
     assert "ONEMAP_TOKEN_URL" in notebook
     assert "print(access_token)" not in notebook
     assert "print(onemap_token)" not in notebook
+
+
+def test_geocoding_notebook_refreshes_tokens_before_expiry():
+    notebook = notebook_text()
+
+    assert "TOKEN_REFRESH_SAFETY_SECONDS = 300" in notebook
+    assert "def jwt_expiry_epoch(access_token):" in notebook
+    assert "base64.urlsafe_b64decode" in notebook
+    assert 'payload["exp"]' in notebook
+    assert "def token_expires_soon(access_token, now_epoch=None):" in notebook
+    assert "expiry_epoch <= now_epoch + TOKEN_REFRESH_SAFETY_SECONDS" in notebook
+    assert "if access_token and not token_expires_soon(access_token):" in notebook
+    assert "return refresh_onemap_token()" in notebook
+
+
+def test_geocoding_notebook_refreshes_and_retries_once_after_401():
+    notebook = notebook_text()
+
+    assert "class OneMapHTTPError(RuntimeError):" in notebook
+    assert "self.status_code = status_code" in notebook
+    assert "def search_onemap_with_refresh(location, access_token):" in notebook
+    assert "if exc.status_code != 401:" in notebook
+    assert "refreshed_token = refresh_onemap_token()" in notebook
+    assert (
+        "return search_onemap(location, refreshed_token), refreshed_token"
+        in notebook
+    )
+    assert "payload, onemap_token = search_onemap_with_refresh(" in notebook
 
 
 def test_geocoding_notebook_rejects_ambiguous_postal_codes():

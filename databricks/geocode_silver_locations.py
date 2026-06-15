@@ -15,6 +15,8 @@ Silver requests table.
 
 # COMMAND ----------
 
+import base64
+import binascii
 import json
 import re
 import time
@@ -23,6 +25,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+from databricks.sdk import WorkspaceClient
 from pyspark.sql import Row
 from pyspark.sql.types import (
     DoubleType,
@@ -38,6 +41,7 @@ ONEMAP_TOKEN_URL = "https://www.onemap.gov.sg/api/auth/post/getToken"
 ONEMAP_SEARCH_URL = "https://www.onemap.gov.sg/api/common/elastic/search"
 SINGAPORE_POSTAL_CODE_PATTERN = re.compile(r"^\d{6}$")
 SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+TOKEN_REFRESH_SAFETY_SECONDS = 300
 
 NON_SPECIFIC_LOCATIONS = {
     "any",
@@ -324,6 +328,16 @@ def get_optional_secret(key):
         return None
 
 
+class OneMapHTTPError(RuntimeError):
+    """Expose the OneMap HTTP status without leaking authorization headers."""
+
+    def __init__(self, status_code, response_text):
+        super().__init__(
+            f"OneMap returned HTTP {status_code}: {response_text}"
+        )
+        self.status_code = status_code
+
+
 def http_json(url, method="GET", params=None, payload=None, headers=None):
     """Make a bounded JSON HTTP request using only the Python standard library."""
     if params:
@@ -355,25 +369,60 @@ def http_json(url, method="GET", params=None, payload=None, headers=None):
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         response_text = exc.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(
-            f"OneMap returned HTTP {exc.code}: {response_text}"
-        ) from exc
+        raise OneMapHTTPError(exc.code, response_text) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Could not reach OneMap: {exc.reason}") from exc
 
 
-def get_onemap_token():
-    """Use a supplied token or obtain a fresh token from stored credentials."""
-    access_token = get_optional_secret("access-token")
-    if access_token:
-        return access_token
+def jwt_expiry_epoch(access_token):
+    """Return a JWT expiry epoch, or None when the token is opaque/malformed."""
+    try:
+        payload_segment = access_token.split(".")[1]
+        padding = "=" * (-len(payload_segment) % 4)
+        payload = json.loads(
+            base64.urlsafe_b64decode(payload_segment + padding).decode("utf-8")
+        )
+        return int(payload["exp"])
+    except (
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        binascii.Error,
+    ):
+        return None
 
+
+def token_expires_soon(access_token, now_epoch=None):
+    """Refresh JWTs five minutes before expiry; let opaque tokens use 401 retry."""
+    expiry_epoch = jwt_expiry_epoch(access_token)
+    if expiry_epoch is None:
+        return False
+
+    if now_epoch is None:
+        now_epoch = int(datetime.now(timezone.utc).timestamp())
+
+    return expiry_epoch <= now_epoch + TOKEN_REFRESH_SAFETY_SECONDS
+
+
+def persist_access_token(access_token):
+    """Store the replacement token for reuse by later notebook job runs."""
+    WorkspaceClient().secrets.put_secret(
+        scope=SECRET_SCOPE,
+        key="access-token",
+        string_value=access_token,
+    )
+
+
+def refresh_onemap_token():
+    """Authenticate with OneMap, cache the replacement token, and return it."""
     email = get_optional_secret("email")
     password = get_optional_secret("password")
     if not email or not password:
         raise RuntimeError(
-            f"Secret scope {SECRET_SCOPE!r} must contain either 'access-token' "
-            "or both 'email' and 'password'"
+            f"Secret scope {SECRET_SCOPE!r} must contain both 'email' and "
+            "'password' so expired OneMap tokens can be refreshed"
         )
 
     response = http_json(
@@ -384,7 +433,17 @@ def get_onemap_token():
     access_token = response.get("access_token")
     if not access_token:
         raise RuntimeError("OneMap authentication returned no access_token")
+
+    persist_access_token(access_token)
     return access_token
+
+
+def get_onemap_token():
+    """Reuse a valid cached token or refresh it before its JWT expiry."""
+    access_token = get_optional_secret("access-token")
+    if access_token and not token_expires_soon(access_token):
+        return access_token
+    return refresh_onemap_token()
 
 
 def search_onemap(location, access_token):
@@ -399,6 +458,18 @@ def search_onemap(location, access_token):
         },
         headers={"Authorization": f"Bearer {access_token}"},
     )
+
+
+def search_onemap_with_refresh(location, access_token):
+    """Refresh and retry once when OneMap rejects a token with HTTP 401."""
+    try:
+        return search_onemap(location, access_token), access_token
+    except OneMapHTTPError as exc:
+        if exc.status_code != 401:
+            raise
+
+    refreshed_token = refresh_onemap_token()
+    return search_onemap(location, refreshed_token), refreshed_token
 
 
 def choose_result(payload):
@@ -525,7 +596,10 @@ if locations_to_process:
             continue
 
         try:
-            payload = search_onemap(normalized_location, onemap_token)
+            payload, onemap_token = search_onemap_with_refresh(
+                normalized_location,
+                onemap_token,
+            )
             result, result_count, status = choose_result(payload)
 
             if result is None:
