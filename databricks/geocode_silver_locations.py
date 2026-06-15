@@ -6,7 +6,7 @@ Import this file as a Databricks Python notebook. The job:
 1. Creates the reusable Delta geocode cache and manual-override tables.
 2. Applies reviewed overrides before making API calls.
 3. Selects only distinct locations that are new or had a transient error.
-4. Makes a bounded number of OneMap requests on the notebook driver.
+4. Makes an optionally bounded number of OneMap requests on the notebook driver.
 5. Idempotently merges one result per normalized location into the cache.
 
 The notebook never updates the Airflow-managed Bronze table or the dbt-managed
@@ -40,6 +40,7 @@ from pyspark.sql.types import (
 ONEMAP_TOKEN_URL = "https://www.onemap.gov.sg/api/auth/post/getToken"
 ONEMAP_SEARCH_URL = "https://www.onemap.gov.sg/api/common/elastic/search"
 SINGAPORE_POSTAL_CODE_PATTERN = re.compile(r"^\d{6}$")
+POSTAL_CODE_IN_TEXT_PATTERN = re.compile(r"(?<!\d)(\d{6})(?!\d)")
 SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 TOKEN_REFRESH_SAFETY_SECONDS = 300
 
@@ -106,7 +107,11 @@ dbutils.widgets.text(
     "telehitch-onemap",
     "OneMap secret scope",
 )
-dbutils.widgets.text("max_locations_per_run", "100", "Maximum API calls")
+dbutils.widgets.text(
+    "max_locations_per_run",
+    "0",
+    "Maximum locations (0 = unlimited)",
+)
 dbutils.widgets.text(
     "request_timeout_seconds",
     "30",
@@ -150,6 +155,13 @@ def positive_int(value, label):
     return result
 
 
+def non_negative_int(value, label):
+    result = int(value)
+    if result < 0:
+        raise ValueError(f"{label} must be zero or greater")
+    return result
+
+
 def non_negative_float(value, label):
     result = float(value)
     if result < 0:
@@ -178,7 +190,7 @@ OVERRIDES_TABLE = quoted_relation(
     dbutils.widgets.get("overrides_table"),
 )
 SECRET_SCOPE = dbutils.widgets.get("secret_scope")
-MAX_LOCATIONS_PER_RUN = positive_int(
+MAX_LOCATIONS_PER_RUN = non_negative_int(
     dbutils.widgets.get("max_locations_per_run"),
     "max_locations_per_run",
 )
@@ -194,7 +206,10 @@ SLEEP_BETWEEN_REQUESTS_SECONDS = non_negative_float(
 print(f"Requests source: {REQUESTS_TABLE}")
 print(f"Geocode cache: {GEOCODES_TABLE}")
 print(f"Overrides: {OVERRIDES_TABLE}")
-print(f"Maximum locations this run: {MAX_LOCATIONS_PER_RUN}")
+print(
+    "Maximum locations this run: "
+    f"{MAX_LOCATIONS_PER_RUN or 'unlimited'}"
+)
 
 
 # COMMAND ----------
@@ -314,6 +329,11 @@ def normalize_location(value):
         return None
     normalized = re.sub(r"\s+", " ", value).strip().lower()
     return normalized or None
+
+
+def postal_codes_in_location(value):
+    """Return unique standalone six-digit codes in their original order."""
+    return list(dict.fromkeys(POSTAL_CODE_IN_TEXT_PATTERN.findall(value or "")))
 
 
 def get_optional_secret(key):
@@ -498,6 +518,12 @@ def choose_result(payload):
 
 # COMMAND ----------
 
+location_limit_clause = (
+    f"LIMIT {MAX_LOCATIONS_PER_RUN}"
+    if MAX_LOCATIONS_PER_RUN > 0
+    else ""
+)
+
 locations_to_process = spark.sql(
     f"""
     WITH all_locations AS (
@@ -533,16 +559,18 @@ locations_to_process = spark.sql(
       AND (
           geocodes.normalized_location IS NULL
           OR geocodes.resolution_status = 'error'
+          OR (
+              geocodes.postal_code IS NULL
+              AND locations.normalized_location RLIKE
+                  '(^|[^0-9])[0-9]{{6}}([^0-9]|$)'
+          )
       )
     ORDER BY locations.normalized_location
-    LIMIT {MAX_LOCATIONS_PER_RUN}
+    {location_limit_clause}
     """
 ).collect()
 
 print(f"Unresolved locations selected: {len(locations_to_process)}")
-
-
-# COMMAND ----------
 
 def no_result_row(
     normalized_location,
@@ -571,9 +599,9 @@ def no_result_row(
 
 
 output_rows = []
+onemap_token = None
 
 if locations_to_process:
-    onemap_token = get_onemap_token()
     attempted_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     for location_row in locations_to_process:
@@ -581,6 +609,27 @@ if locations_to_process:
             location_row["normalized_location"]
         )
         original_location = location_row["original_location"]
+        postal_codes = postal_codes_in_location(original_location)
+
+        if postal_codes:
+            output_rows.append(
+                Row(
+                    normalized_location=normalized_location,
+                    original_location=original_location,
+                    postal_code=",".join(postal_codes),
+                    latitude=None,
+                    longitude=None,
+                    formatted_address=None,
+                    search_value=None,
+                    resolution_status="resolved",
+                    resolution_source="rule",
+                    result_count=len(postal_codes),
+                    error_message=None,
+                    attempted_at=attempted_at,
+                    resolved_at=attempted_at,
+                )
+            )
+            continue
 
         if normalized_location in NON_SPECIFIC_LOCATIONS:
             output_rows.append(
@@ -596,6 +645,8 @@ if locations_to_process:
             continue
 
         try:
+            if onemap_token is None:
+                onemap_token = get_onemap_token()
             payload, onemap_token = search_onemap_with_refresh(
                 normalized_location,
                 onemap_token,

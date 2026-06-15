@@ -19,3 +19,35 @@ sources:
             data_tests: [not_null]
           - name: scraped_at_gmt8
             data_tests: [not_null]
+
+  - name: telehitch_silver
+    description: Silver lookup tables maintained outside dbt by Databricks notebooks.
+    database: workspace
+    schema: silver
+    quoting:
+      database: true
+      schema: true
+      identifier: true
+    tables:
+      - name: location_geocodes
+        description: Reusable normalized-location geocode cache maintained by the OneMap notebook.
+        identifier: location_geocodes
+        columns:
+          - name: normalized_location
+            data_tests:
+              - not_null
+              - unique
+          - name: resolution_status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [resolved, no_match, ambiguous, error]
+          - name: resolution_source
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [onemap, rule, override]
+          - name: result_count
+            data_tests: [not_null]
