@@ -94,13 +94,13 @@ extracted as (
             message,
             r'(?im)^\s*(?:pick\s*up(?:\s+(?:point|location))?|pickup(?:\s+(?:point|location))?|from)\s*:\s*([^\r\n]+)',
             1
-        )), '') as pickup_location,
+        )), '') as pickup_location_raw,
 
         nullif(trim(regexp_extract(
             message,
             r'(?im)^\s*(?:drop\s*off(?:\s+(?:point|location))?|dropoff(?:\s+(?:point|location))?|destination|to)\s*:\s*([^\r\n]+)',
             1
-        )), '') as dropoff_location,
+        )), '') as dropoff_location_raw,
 
         nullif(trim(regexp_extract(
             message,
@@ -118,12 +118,24 @@ extracted as (
             message,
             r'(?i)\b(\d{1,2})\s*(?:pax|passengers?)\b',
             1
-        ), '') as int) as pax_before_label
+        ), '') as int) as pax_before_label,
+
+        try_cast(nullif(regexp_extract(
+            message,
+            r'(?i)\bpax\s*:?\s*(\d{1,2})\s*[-–]\s*\d{1,2}\b',
+            1
+        ), '') as int) as pax_range_min,
+
+        try_cast(nullif(regexp_extract(
+            message,
+            r'(?i)\bpax\s*:?\s*\d{1,2}\s*[-–]\s*(\d{1,2})\b',
+            1
+        ), '') as int) as pax_range_max
     from requests_only
     where request_type is not null
 ),
 
-cleaned as (
+normalized as (
     select
         channel,
         topic_id,
@@ -134,8 +146,28 @@ cleaned as (
         sender_handle,
         scraped_at_gmt8,
         request_type,
-        pickup_location,
-        dropoff_location,
+        case
+            when regexp_like(
+                lower(pickup_location_raw),
+                r'^jb(?:\s|[/→👉🇲🇾🇸🇬-])*sg\s*$'
+            ) then 'jb'
+            when regexp_like(
+                lower(pickup_location_raw),
+                r'^sg(?:\s|[/→👉🇲🇾🇸🇬-])*jb\s*$'
+            ) then 'sg'
+            else pickup_location_raw
+        end as pickup_location,
+        case
+            when regexp_like(
+                lower(dropoff_location_raw),
+                r'^jb(?:\s|[/→👉🇲🇾🇸🇬-])*sg\s*$'
+            ) then 'jb'
+            when regexp_like(
+                lower(dropoff_location_raw),
+                r'^sg(?:\s|[/→👉🇲🇾🇸🇬-])*jb\s*$'
+            ) then 'sg'
+            else dropoff_location_raw
+        end as dropoff_location,
         case
             when lower(trim(request_time_text)) = 'now'
                 then cast(message_date_gmt8 as string)
@@ -144,20 +176,29 @@ cleaned as (
         case
             when regexp_like(lower(message), r'\bwhole\s+car\b') then null
             when regexp_like(lower(message), r'\bpax\s*:?\s*(?:-|nil|n/?a|tbc)(?:\s|$)') then null
+            when pax_range_min between 1 and 10
+                and pax_range_max between 1 and 10
+                and pax_range_min <= pax_range_max
+                then cast(floor((pax_range_min + pax_range_max) / 2.0) as int)
             when regexp_like(lower(message), r'\b\d{1,2}\s*[-–]\s*\d{1,2}\s*(?:pax|passengers?)\b') then null
-            when regexp_like(lower(message), r'\bpax\s*:?\s*\d{1,2}\s*[-–]\s*\d{1,2}\b') then null
             when coalesce(pax_after_label, pax_before_label) between 1 and 10
                 then coalesce(pax_after_label, pax_before_label)
             when pax_after_label is null and pax_before_label is null then 1
             else null
-        end as pax_count,
+        end as pax_count
+    from extracted
+),
+
+cleaned as (
+    select
+        *,
         case
             when pickup_location is null then 'missing_pickup'
             when dropoff_location is null then 'missing_dropoff'
             when request_time_text is null then 'missing_time'
             else 'parsed'
         end as parse_status
-    from extracted
+    from normalized
 )
 
 select * from cleaned
