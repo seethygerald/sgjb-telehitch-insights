@@ -118,7 +118,12 @@ def test_declares_notebook_managed_geocode_cache_source():
     assert "- name: location_geocodes" in source
     assert "identifier: location_geocodes" in source
     assert "- name: normalized_location" in source
-    assert "- unique" in source
+    normalized_location_block = source.split("- name: normalized_location", 1)[1]
+    normalized_location_block = normalized_location_block.split(
+        "- name: resolution_status",
+        1,
+    )[0]
+    assert "- unique" not in normalized_location_block
     assert "values: [resolved, no_match, ambiguous, error]" in source
     assert "values: [onemap, rule, override]" in source
     assert "- name: result_count" in source

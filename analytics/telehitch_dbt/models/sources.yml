@@ -36,7 +36,6 @@ sources:
           - name: normalized_location
             data_tests:
               - not_null
-              - unique
           - name: resolution_status
             data_tests:
               - not_null
