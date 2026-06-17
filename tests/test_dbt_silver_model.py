@@ -231,17 +231,23 @@ Pm pm pm thank you"""
     assert parse(reverse) == ("sg", "jb", 3)
 
 
-def test_gold_model_is_a_dbt_table_in_gold_schema():
+def test_gold_model_is_an_incremental_dbt_table_in_gold_schema():
     model = GOLD_MODEL.read_text()
     macro = (DBT_PROJECT / "macros" / "generate_schema_name.sql").read_text()
     schema = (DBT_PROJECT / "models" / "schema.yml").read_text()
+    project = (DBT_PROJECT / "dbt_project.yml").read_text()
 
-    assert "materialized='table'" in model
+    assert "materialized='incremental'" in model
+    assert "incremental_strategy='merge'" in model
+    assert "unique_key='gold_request_id'" in model
+    assert "on_schema_change='fail'" in model
     assert "schema='gold'" in model
     assert "alias='gold_telehitch_requests'" in model
     assert "{{ custom_schema_name | trim }}" in macro
+    assert "gold_incremental_lookback_hours: 6" in project
     assert "- name: gold_telehitch_requests" in schema
     assert "- name: gold_request_id" in schema
+    assert "- name: silver_request_id" in schema
     assert "- unique" in schema
 
 
@@ -275,3 +281,17 @@ def test_gold_model_deduplicates_same_user_route_posts_within_two_hours():
     assert "interval 2 hours" in model
     assert "where prior_post.message_id is null" in model
     assert "where is_canonical_request" not in model
+
+
+def test_gold_model_replaces_affected_silver_request_rows_incrementally():
+    model = GOLD_MODEL.read_text()
+
+    assert "as silver_request_id" in model
+    assert "delete from {{ this }} where silver_request_id in" in model
+    assert "ref('silver_telehitch_requests')" in model
+    assert "gold_incremental_lookback_hours" in model
+    assert "affected_silver_requests as" in model
+    assert "scraped_at_gmt8 >= current_timestamp()" in model
+    assert "where silver_request_id in" in model
+    assert "select silver_request_id" in model
+    assert "from affected_silver_requests" in model

@@ -29,6 +29,9 @@ models:
         data_tests:
           - not_null
           - unique
+      - name: silver_request_id
+        data_tests:
+          - not_null
       - name: is_canonical_request
         data_tests: [not_null]
       - name: telegram_user_key

@@ -1,14 +1,29 @@
 {{
     config(
-        materialized='table',
+        materialized='incremental',
+        incremental_strategy='merge',
+        unique_key='gold_request_id',
         schema='gold',
         alias='gold_telehitch_requests',
-        file_format='delta'
+        file_format='delta',
+        on_schema_change='fail',
+        pre_hook=[
+            "{% if is_incremental() %}"
+            ~ "delete from {{ this }} where silver_request_id in ("
+            ~ "select sha2(concat_ws('||', channel, cast(message_id as string)), 256) "
+            ~ "from {{ ref('silver_telehitch_requests') }} "
+            ~ "where scraped_at_gmt8 >= current_timestamp() - interval "
+            ~ "{{ var('gold_incremental_lookback_hours') }} hours"
+            ~ ")"
+            ~ "{% endif %}"
+        ]
     )
 }}
 
 with silver_requests as (
     select
+        sha2(concat_ws('||', channel, cast(message_id as string)), 256)
+            as silver_request_id,
         channel,
         topic_id,
         message_id,
@@ -29,6 +44,19 @@ with silver_requests as (
         parse_status
     from {{ ref('silver_telehitch_requests') }}
     where parse_status = 'parsed'
+),
+
+affected_silver_requests as (
+    select distinct
+        sha2(concat_ws('||', channel, cast(message_id as string)), 256)
+            as silver_request_id
+    from {{ ref('silver_telehitch_requests') }}
+    where parse_status = 'parsed'
+
+    {% if is_incremental() %}
+      and scraped_at_gmt8 >= current_timestamp()
+          - interval {{ var('gold_incremental_lookback_hours') }} hours
+    {% endif %}
 ),
 
 pickup_geocodes as (
@@ -166,13 +194,13 @@ deduplicated as (
 select
     sha2(concat_ws(
         '||',
-        channel,
-        cast(message_id as string),
+        silver_request_id,
         coalesce(pickup_dedup_location_key, ''),
         coalesce(dropoff_dedup_location_key, ''),
         coalesce(pickup_formatted_address, ''),
         coalesce(dropoff_formatted_address, '')
     ), 256) as gold_request_id,
+    silver_request_id,
     true as is_canonical_request,
     telegram_user_key,
     channel,
@@ -207,3 +235,10 @@ select
     scraped_at_gmt8,
     message
 from deduplicated
+
+{% if is_incremental() %}
+where silver_request_id in (
+    select silver_request_id
+    from affected_silver_requests
+)
+{% endif %}
