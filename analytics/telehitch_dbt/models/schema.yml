@@ -21,3 +21,28 @@ models:
                 values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
               config:
                 where: "pax_count is not null"
+
+  - name: gold_telehitch_requests
+    description: Deduplicated Telegram requests enriched with pickup and dropoff geocode combinations.
+    columns:
+      - name: gold_request_id
+        data_tests:
+          - not_null
+          - unique
+      - name: silver_request_id
+        data_tests:
+          - not_null
+      - name: is_canonical_request
+        data_tests: [not_null]
+      - name: telegram_user_key
+        data_tests: [not_null]
+      - name: channel
+        data_tests: [not_null]
+      - name: message_id
+        data_tests: [not_null]
+      - name: request_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [driver_request, hitcher_request]
