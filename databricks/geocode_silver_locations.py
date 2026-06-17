@@ -7,7 +7,8 @@ Import this file as a Databricks Python notebook. The job:
 2. Applies reviewed overrides before making API calls.
 3. Selects only distinct locations that are new or had a transient error.
 4. Makes an optionally bounded number of OneMap requests on the notebook driver.
-5. Idempotently merges one result per normalized location into the cache.
+5. Idempotently replaces generated results for each processed normalized
+   location while preserving manual overrides.
 
 The notebook never updates the Airflow-managed Bronze table or the dbt-managed
 Silver requests table.
@@ -516,6 +517,15 @@ def choose_result(payload):
     return valid_results[0], len(results), "resolved"
 
 
+def choose_postal_code_result(payload, postal_code):
+    """Return the first exact OneMap result for one explicit postal code."""
+    results = payload.get("results") or []
+    for result in results:
+        if str(result.get("POSTAL") or "").strip() == postal_code:
+            return result, len(results), "resolved"
+    return None, len(results), "no_match"
+
+
 # COMMAND ----------
 
 location_limit_clause = (
@@ -548,7 +558,7 @@ locations_to_process = spark.sql(
             lower(trim(regexp_replace(original_location, '\\\\s+', ' ')))
     )
 
-    SELECT
+    SELECT DISTINCT
         locations.normalized_location,
         locations.original_location
     FROM normalized AS locations
@@ -563,6 +573,11 @@ locations_to_process = spark.sql(
               geocodes.postal_code IS NULL
               AND locations.normalized_location RLIKE
                   '(^|[^0-9])[0-9]{{6}}([^0-9]|$)'
+          )
+          OR (
+              geocodes.postal_code LIKE '%,%'
+              AND locations.normalized_location RLIKE
+                  '(^|[^0-9])[0-9]{{6}}([^0-9].*)?[0-9]{{6}}([^0-9]|$)'
           )
       )
     ORDER BY locations.normalized_location
@@ -612,23 +627,80 @@ if locations_to_process:
         postal_codes = postal_codes_in_location(original_location)
 
         if postal_codes:
-            output_rows.append(
-                Row(
-                    normalized_location=normalized_location,
-                    original_location=original_location,
-                    postal_code=",".join(postal_codes),
-                    latitude=None,
-                    longitude=None,
-                    formatted_address=None,
-                    search_value=None,
-                    resolution_status="resolved",
-                    resolution_source="rule",
-                    result_count=len(postal_codes),
-                    error_message=None,
-                    attempted_at=attempted_at,
-                    resolved_at=attempted_at,
-                )
-            )
+            for postal_code in postal_codes:
+                try:
+                    if onemap_token is None:
+                        onemap_token = get_onemap_token()
+                    payload, onemap_token = search_onemap_with_refresh(
+                        postal_code,
+                        onemap_token,
+                    )
+                    result, result_count, status = choose_postal_code_result(
+                        payload,
+                        postal_code,
+                    )
+
+                    if result is None:
+                        output_rows.append(
+                            Row(
+                                normalized_location=normalized_location,
+                                original_location=original_location,
+                                postal_code=postal_code,
+                                latitude=None,
+                                longitude=None,
+                                formatted_address=None,
+                                search_value=None,
+                                resolution_status="resolved",
+                                resolution_source="rule",
+                                result_count=result_count,
+                                error_message=(
+                                    "OneMap returned no exact result"
+                                    f" for postal code {postal_code}"
+                                    if status == "no_match"
+                                    else None
+                                ),
+                                attempted_at=attempted_at,
+                                resolved_at=attempted_at,
+                            )
+                        )
+                    else:
+                        output_rows.append(
+                            Row(
+                                normalized_location=normalized_location,
+                                original_location=original_location,
+                                postal_code=postal_code,
+                                latitude=float(result["LATITUDE"]),
+                                longitude=float(result["LONGITUDE"]),
+                                formatted_address=result.get("ADDRESS"),
+                                search_value=result.get("SEARCHVAL"),
+                                resolution_status="resolved",
+                                resolution_source="onemap",
+                                result_count=result_count,
+                                error_message=None,
+                                attempted_at=attempted_at,
+                                resolved_at=attempted_at,
+                            )
+                        )
+                except Exception as exc:
+                    output_rows.append(
+                        Row(
+                            normalized_location=normalized_location,
+                            original_location=original_location,
+                            postal_code=postal_code,
+                            latitude=None,
+                            longitude=None,
+                            formatted_address=None,
+                            search_value=None,
+                            resolution_status="resolved",
+                            resolution_source="rule",
+                            result_count=0,
+                            error_message=str(exc)[:1000],
+                            attempted_at=attempted_at,
+                            resolved_at=attempted_at,
+                        )
+                    )
+
+                time.sleep(SLEEP_BETWEEN_REQUESTS_SECONDS)
             continue
 
         if normalized_location in NON_SPECIFIC_LOCATIONS:
@@ -710,27 +782,18 @@ if output_rows:
 
     spark.sql(
         f"""
-        MERGE INTO {GEOCODES_TABLE} AS target
-        USING new_location_geocodes AS source
-          ON target.normalized_location = source.normalized_location
+        DELETE FROM {GEOCODES_TABLE}
+        WHERE resolution_source <> 'override'
+          AND normalized_location IN (
+              SELECT DISTINCT normalized_location
+              FROM new_location_geocodes
+          )
+        """
+    )
 
-        WHEN MATCHED
-          AND target.resolution_source <> 'override'
-        THEN UPDATE SET
-            target.original_location = source.original_location,
-            target.postal_code = source.postal_code,
-            target.latitude = source.latitude,
-            target.longitude = source.longitude,
-            target.formatted_address = source.formatted_address,
-            target.search_value = source.search_value,
-            target.resolution_status = source.resolution_status,
-            target.resolution_source = source.resolution_source,
-            target.result_count = source.result_count,
-            target.error_message = source.error_message,
-            target.attempted_at = source.attempted_at,
-            target.resolved_at = source.resolved_at
-
-        WHEN NOT MATCHED THEN INSERT (
+    spark.sql(
+        f"""
+        INSERT INTO {GEOCODES_TABLE} (
             normalized_location,
             original_location,
             postal_code,
@@ -745,24 +808,24 @@ if output_rows:
             attempted_at,
             resolved_at
         )
-        VALUES (
-            source.normalized_location,
-            source.original_location,
-            source.postal_code,
-            source.latitude,
-            source.longitude,
-            source.formatted_address,
-            source.search_value,
-            source.resolution_status,
-            source.resolution_source,
-            source.result_count,
-            source.error_message,
-            source.attempted_at,
-            source.resolved_at
-        )
+        SELECT
+            normalized_location,
+            original_location,
+            postal_code,
+            latitude,
+            longitude,
+            formatted_address,
+            search_value,
+            resolution_status,
+            resolution_source,
+            result_count,
+            error_message,
+            attempted_at,
+            resolved_at
+        FROM new_location_geocodes
         """
     )
-    print(f"Merged {len(output_rows)} location results into {GEOCODES_TABLE}")
+    print(f"Wrote {len(output_rows)} location results into {GEOCODES_TABLE}")
 else:
     print("No unresolved locations required an API call.")
 
