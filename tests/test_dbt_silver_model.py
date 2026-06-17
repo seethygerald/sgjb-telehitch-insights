@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 DBT_PROJECT = ROOT / "analytics" / "telehitch_dbt"
 SILVER_MODEL = DBT_PROJECT / "models" / "silver_telehitch_requests.sql"
+GOLD_MODEL = DBT_PROJECT / "models" / "gold_telehitch_requests.sql"
 
 
 def test_silver_model_accepts_explicit_and_structured_requests():
@@ -109,6 +110,13 @@ def test_silver_model_reads_the_declared_bronze_source():
     assert "raw_table: sgjb-telehitch-raw" in project
 
 
+def test_silver_model_is_pinned_to_the_silver_schema_for_downstream_refs():
+    model = SILVER_MODEL.read_text()
+
+    assert "schema='silver'" in model
+    assert "unique_key=['channel', 'message_id']" in model
+
+
 def test_declares_notebook_managed_geocode_cache_source():
     source = (DBT_PROJECT / "models" / "sources.yml").read_text()
 
@@ -118,7 +126,12 @@ def test_declares_notebook_managed_geocode_cache_source():
     assert "- name: location_geocodes" in source
     assert "identifier: location_geocodes" in source
     assert "- name: normalized_location" in source
-    assert "- unique" in source
+    normalized_location_block = source.split("- name: normalized_location", 1)[1]
+    normalized_location_block = normalized_location_block.split(
+        "- name: resolution_status",
+        1,
+    )[0]
+    assert "- unique" not in normalized_location_block
     assert "values: [resolved, no_match, ambiguous, error]" in source
     assert "values: [onemap, rule, override]" in source
     assert "- name: result_count" in source
@@ -223,3 +236,69 @@ Pm pm pm thank you"""
 
     assert parse(message) == ("jb", "sg", 3)
     assert parse(reverse) == ("sg", "jb", 3)
+
+
+def test_gold_model_is_an_incremental_dbt_table_in_gold_schema():
+    model = GOLD_MODEL.read_text()
+    macro = (DBT_PROJECT / "macros" / "generate_schema_name.sql").read_text()
+    schema = (DBT_PROJECT / "models" / "schema.yml").read_text()
+    project = (DBT_PROJECT / "dbt_project.yml").read_text()
+
+    assert "materialized='incremental'" in model
+    assert "incremental_strategy='merge'" in model
+    assert "unique_key='gold_request_id'" in model
+    assert "on_schema_change='fail'" in model
+    assert "schema='gold'" in model
+    assert "alias='gold_telehitch_requests'" in model
+    assert "{{ custom_schema_name | trim }}" in macro
+    assert "gold_incremental_lookback_hours: 6" in project
+    assert "- name: gold_telehitch_requests" in schema
+    assert "- name: gold_request_id" in schema
+    assert "- name: silver_request_id" in schema
+    assert "- unique" in schema
+
+
+def test_gold_model_attaches_pickup_and_dropoff_geocode_combinations():
+    model = GOLD_MODEL.read_text()
+
+    assert "source('telehitch_silver', 'location_geocodes')" in model
+    assert "left join pickup_geocodes" in model
+    assert "left join dropoff_geocodes" in model
+    assert "pickup_geocodes.geocode_rank = 1" in model
+    assert "dropoff_geocodes.geocode_rank = 1" in model
+    assert "pickup_postal_code" in model
+    assert "pickup_formatted_address" in model
+    assert "dropoff_postal_code" in model
+    assert "dropoff_formatted_address" in model
+
+
+def test_gold_model_deduplicates_same_user_route_posts_within_two_hours():
+    model = GOLD_MODEL.read_text()
+
+    assert "cast(sender_id as string)" in model
+    assert "lower(trim(sender_handle))" in model
+    assert "concat('unknown:', channel, '#', cast(message_id as string))" in model
+    assert "as telegram_user_key" in model
+    assert "coalesce(pickup_postal_code, normalized_pickup_location)" in model
+    assert "coalesce(dropoff_postal_code, normalized_dropoff_location)" in model
+    assert "left join with_dedup_key as prior_post" in model
+    assert "prior_post.telegram_user_key = candidate.telegram_user_key" in model
+    assert "prior_post.pickup_dedup_location_key = candidate.pickup_dedup_location_key" in model
+    assert "prior_post.dropoff_dedup_location_key = candidate.dropoff_dedup_location_key" in model
+    assert "interval 2 hours" in model
+    assert "where prior_post.message_id is null" in model
+    assert "where is_canonical_request" not in model
+
+
+def test_gold_model_replaces_affected_silver_request_rows_incrementally():
+    model = GOLD_MODEL.read_text()
+
+    assert "as silver_request_id" in model
+    assert "delete from {{ this }} where silver_request_id in" in model
+    assert "ref('silver_telehitch_requests')" in model
+    assert "gold_incremental_lookback_hours" in model
+    assert "affected_silver_requests as" in model
+    assert "scraped_at_gmt8 >= current_timestamp()" in model
+    assert "where silver_request_id in" in model
+    assert "select silver_request_id" in model
+    assert "from affected_silver_requests" in model
