@@ -39,11 +39,9 @@ def test_geocoding_notebook_is_unlimited_by_default_and_incremental():
     assert "f\"{MAX_LOCATIONS_PER_RUN or 'unlimited'}\"" in notebook
     assert "geocodes.normalized_location IS NULL" in notebook
     assert "geocodes.resolution_status = 'error'" in notebook
-    assert "MERGE INTO {GEOCODES_TABLE}" in notebook
-    assert (
-        "target.normalized_location = source.normalized_location"
-        in notebook
-    )
+    assert "DELETE FROM {GEOCODES_TABLE}" in notebook
+    assert "INSERT INTO {GEOCODES_TABLE}" in notebook
+    assert "USING new_location_geocodes AS source" not in notebook
 
 
 def test_selection_and_processing_share_one_databricks_cell():
@@ -108,7 +106,7 @@ def test_geocoding_notebook_rejects_ambiguous_postal_codes():
     assert 'return valid_results[0], len(results), "resolved"' in notebook
 
 
-def test_geocoding_notebook_extracts_postal_codes_without_api_calls():
+def test_geocoding_notebook_expands_postal_codes_into_separate_rows():
     notebook = notebook_text()
 
     assert (
@@ -117,16 +115,21 @@ def test_geocoding_notebook_extracts_postal_codes_without_api_calls():
     )
     assert "def postal_codes_in_location(value):" in notebook
     assert "list(dict.fromkeys(" in notebook
-    assert 'postal_code=",".join(postal_codes)' in notebook
-    assert "result_count=len(postal_codes)" in notebook
+    assert "def choose_postal_code_result(payload, postal_code):" in notebook
+    assert "for postal_code in postal_codes:" in notebook
+    assert "search_onemap_with_refresh(\n                        postal_code" in notebook
+    assert "postal_code=postal_code" in notebook
+    assert 'postal_code=",".join(postal_codes)' not in notebook
+    assert "result_count=len(postal_codes)" not in notebook
     assert "geocodes.postal_code IS NULL" in notebook
+    assert "geocodes.postal_code LIKE '%,%'" in notebook
 
-    postal_rule_index = notebook.index("if postal_codes:")
+    postal_loop_index = notebook.index("for postal_code in postal_codes:")
     token_index = notebook.index(
         "onemap_token = get_onemap_token()",
-        postal_rule_index,
+        postal_loop_index,
     )
-    assert postal_rule_index < token_index
+    assert postal_loop_index < token_index
 
 
 def test_manual_overrides_are_applied_before_api_selection():
@@ -137,4 +140,4 @@ def test_manual_overrides_are_applied_before_api_selection():
     selection_index = notebook.index("locations_to_process = spark.sql")
 
     assert ensure_index < override_index < selection_index
-    assert "target.resolution_source <> 'override'" in notebook
+    assert "resolution_source <> 'override'" in notebook
