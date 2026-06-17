@@ -1,5 +1,6 @@
 {{
     config(
+        schema='silver',
         unique_key=['channel', 'message_id'],
         on_schema_change='fail'
     )

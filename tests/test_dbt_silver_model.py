@@ -110,6 +110,13 @@ def test_silver_model_reads_the_declared_bronze_source():
     assert "raw_table: sgjb-telehitch-raw" in project
 
 
+def test_silver_model_is_pinned_to_the_silver_schema_for_downstream_refs():
+    model = SILVER_MODEL.read_text()
+
+    assert "schema='silver'" in model
+    assert "unique_key=['channel', 'message_id']" in model
+
+
 def test_declares_notebook_managed_geocode_cache_source():
     source = (DBT_PROJECT / "models" / "sources.yml").read_text()
 
