@@ -106,6 +106,20 @@ def test_geocoding_notebook_rejects_ambiguous_postal_codes():
     assert 'return valid_results[0], len(results), "resolved"' in notebook
 
 
+def test_geocoding_notebook_tries_conservative_place_name_fallbacks():
+    notebook = notebook_text()
+
+    assert "LOCATION_SEARCH_SUFFIX_PATTERN = re.compile(" in notebook
+    assert "side\\s+entrance|main\\s+entrance" in notebook
+    assert "hotel|entrance|lobby" in notebook
+    assert "def onemap_search_values(normalized_location):" in notebook
+    assert "values = [normalized_location]" in notebook
+    assert "LOCATION_SEARCH_SUFFIX_PATTERN.sub" in notebook
+    assert "for search_value in onemap_search_values(normalized_location):" in notebook
+    assert "search_onemap_with_refresh(\n                    search_value" in notebook
+    assert 'if status == "ambiguous":' in notebook
+
+
 def test_geocoding_notebook_expands_postal_codes_into_separate_rows():
     notebook = notebook_text()
 

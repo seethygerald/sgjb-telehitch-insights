@@ -42,6 +42,13 @@ ONEMAP_TOKEN_URL = "https://www.onemap.gov.sg/api/auth/post/getToken"
 ONEMAP_SEARCH_URL = "https://www.onemap.gov.sg/api/common/elastic/search"
 SINGAPORE_POSTAL_CODE_PATTERN = re.compile(r"^\d{6}$")
 POSTAL_CODE_IN_TEXT_PATTERN = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+LOCATION_SEARCH_SUFFIX_PATTERN = re.compile(
+    r"\s+(?:"
+    r"side\s+entrance|main\s+entrance|drop\s*off\s+point|"
+    r"pick\s*up\s+point|pickup\s+point|taxi\s+stand|"
+    r"hotel|entrance|lobby"
+    r")$"
+)
 SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 TOKEN_REFRESH_SAFETY_SECONDS = 300
 
@@ -526,6 +533,22 @@ def choose_postal_code_result(payload, postal_code):
     return None, len(results), "no_match"
 
 
+def onemap_search_values(normalized_location):
+    """Return conservative OneMap search fallbacks for noisy place names."""
+    values = [normalized_location]
+    candidate = normalized_location
+
+    while True:
+        stripped = LOCATION_SEARCH_SUFFIX_PATTERN.sub("", candidate).strip()
+        if stripped == candidate:
+            break
+        if stripped and stripped not in values:
+            values.append(stripped)
+        candidate = stripped
+
+    return values
+
+
 # COMMAND ----------
 
 location_limit_clause = (
@@ -719,11 +742,19 @@ if locations_to_process:
         try:
             if onemap_token is None:
                 onemap_token = get_onemap_token()
-            payload, onemap_token = search_onemap_with_refresh(
-                normalized_location,
-                onemap_token,
-            )
-            result, result_count, status = choose_result(payload)
+            result = None
+            result_count = 0
+            status = "no_match"
+            for search_value in onemap_search_values(normalized_location):
+                payload, onemap_token = search_onemap_with_refresh(
+                    search_value,
+                    onemap_token,
+                )
+                result, result_count, status = choose_result(payload)
+                if result is not None:
+                    break
+                if status == "ambiguous":
+                    break
 
             if result is None:
                 output_rows.append(

@@ -136,6 +136,16 @@ extracted as (
     where request_type is not null
 ),
 
+flag_cleaned as (
+    select
+        *,
+        nullif(trim(regexp_replace(pickup_location_raw, '[🇸🇬🇲🇾]', '')), '')
+            as pickup_location_without_flags,
+        nullif(trim(regexp_replace(dropoff_location_raw, '[🇸🇬🇲🇾]', '')), '')
+            as dropoff_location_without_flags
+    from extracted
+),
+
 normalized as (
     select
         channel,
@@ -149,25 +159,25 @@ normalized as (
         request_type,
         case
             when regexp_like(
-                lower(pickup_location_raw),
+                lower(pickup_location_without_flags),
                 r'^jb(?:\s|[/→👉🇲🇾🇸🇬-])*sg\s*$'
             ) then 'jb'
             when regexp_like(
-                lower(pickup_location_raw),
+                lower(pickup_location_without_flags),
                 r'^sg(?:\s|[/→👉🇲🇾🇸🇬-])*jb\s*$'
             ) then 'sg'
-            else pickup_location_raw
+            else pickup_location_without_flags
         end as pickup_location,
         case
             when regexp_like(
-                lower(dropoff_location_raw),
+                lower(dropoff_location_without_flags),
                 r'^jb(?:\s|[/→👉🇲🇾🇸🇬-])*sg\s*$'
             ) then 'jb'
             when regexp_like(
-                lower(dropoff_location_raw),
+                lower(dropoff_location_without_flags),
                 r'^sg(?:\s|[/→👉🇲🇾🇸🇬-])*jb\s*$'
             ) then 'sg'
-            else dropoff_location_raw
+            else dropoff_location_without_flags
         end as dropoff_location,
         case
             when lower(trim(request_time_text)) = 'now'
@@ -187,7 +197,7 @@ normalized as (
             when pax_after_label is null and pax_before_label is null then 1
             else null
         end as pax_count
-    from extracted
+    from flag_cleaned
 ),
 
 cleaned as (

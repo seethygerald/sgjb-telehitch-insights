@@ -172,19 +172,26 @@ def test_silver_model_normalizes_compact_cross_border_routes_conservatively():
 
     assert "as pickup_location_raw" in model
     assert "as dropoff_location_raw" in model
+    assert "as pickup_location_without_flags" in model
+    assert "as dropoff_location_without_flags" in model
+    assert "regexp_replace(pickup_location_raw, '[🇸🇬🇲🇾]', '')" in model
+    assert "regexp_replace(dropoff_location_raw, '[🇸🇬🇲🇾]', '')" in model
     assert r"^jb(?:\s|[/→👉🇲🇾🇸🇬-])*sg\s*$" in model
     assert r"^sg(?:\s|[/→👉🇲🇾🇸🇬-])*jb\s*$" in model
     assert "then 'jb'" in model
     assert "then 'sg'" in model
-    assert "else pickup_location_raw" in model
-    assert "else dropoff_location_raw" in model
+    assert "else pickup_location_without_flags" in model
+    assert "else dropoff_location_without_flags" in model
 
     route_pattern = re.compile(r"^(jb|sg)(?:\s|[/→👉🇲🇾🇸🇬-])*(sg|jb)\s*$", re.I)
 
     def normalize_location(location):
+        location = re.sub("[🇸🇬🇲🇾]", "", location).strip()
         match = route_pattern.fullmatch(location)
         return match.group(1).lower() if match and match.group(1) != match.group(2) else location
 
+    assert normalize_location("SG🇸🇬") == "SG"
+    assert normalize_location("JB🇲🇾") == "JB"
     assert normalize_location("JB🇲🇾SG") == "jb"
     assert normalize_location("SG🇸🇬JB") == "sg"
     assert normalize_location("JB SG") == "jb"
