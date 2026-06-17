@@ -248,6 +248,7 @@ def test_gold_model_is_an_incremental_dbt_table_in_gold_schema():
     assert "incremental_strategy='merge'" in model
     assert "unique_key='gold_request_id'" in model
     assert "on_schema_change='fail'" in model
+    assert "'delta.feature.timestampNtz': 'supported'" in model
     assert "schema='gold'" in model
     assert "alias='gold_telehitch_requests'" in model
     assert "{{ custom_schema_name | trim }}" in macro

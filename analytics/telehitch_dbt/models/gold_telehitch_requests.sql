@@ -7,6 +7,9 @@
         alias='gold_telehitch_requests',
         file_format='delta',
         on_schema_change='fail',
+        tblproperties={
+            'delta.feature.timestampNtz': 'supported'
+        },
         pre_hook=[
             "{% if is_incremental() %}"
             ~ "delete from {{ this }} where silver_request_id in ("
