@@ -50,7 +50,7 @@ function tabFilter(tab: RouteTab) {
 function buildRecentSql(minutes: number, tab: RouteTab, limit: number) {
   return `SELECT ${SELECT_COLUMNS.join(",\n       ")}
 FROM ${tableName()}
-WHERE message_date_gmt8 >= current_timestamp() - interval ${minutes} minutes
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
   AND pickup_latitude IS NOT NULL
   AND pickup_longitude IS NOT NULL
   AND dropoff_latitude IS NOT NULL
@@ -102,6 +102,17 @@ function parseString(value: unknown): string | null {
   return String(value);
 }
 
+function parseSingaporeTimestamp(value: string) {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
+  return new Date(hasTimezone ? value : `${value.replace(" ", "T")}+08:00`).getTime();
+}
+
+function isWithinRecentWindow(request: TelehitchRequest, minutes: number) {
+  const messageTime = parseSingaporeTimestamp(request.message_date_gmt8);
+  if (!Number.isFinite(messageTime)) return false;
+  return messageTime >= Date.now() - minutes * 60 * 1000;
+}
+
 function rowsToRequests(response: DatabricksStatementResponse): TelehitchRequest[] {
   if (response.status.state !== "SUCCEEDED") {
     throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
@@ -145,5 +156,5 @@ function rowsToRequests(response: DatabricksStatementResponse): TelehitchRequest
 export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit: number) {
   const statement = buildRecentSql(minutes, tab, limit);
   const response = await executeStatement(statement);
-  return rowsToRequests(response);
+  return rowsToRequests(response).filter((request) => isWithinRecentWindow(request, minutes));
 }

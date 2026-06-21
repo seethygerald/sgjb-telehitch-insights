@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import RequestFeed from "../components/RequestFeed";
+import { parseSingaporeDate } from "../lib/mapNodes";
+import type { RequestNode } from "../lib/mapNodes";
 import { RequestsResponse, RouteTab, TelehitchRequest } from "../lib/types";
 
 const TelehitchMap = dynamic(() => import("../components/TelehitchMap"), { ssr: false, loading: () => <div className="map-loading">Loading map…</div> });
@@ -17,6 +19,7 @@ export default function Home() {
   const [requests, setRequests] = useState<TelehitchRequest[]>([]);
   const [status, setStatus] = useState("Loading recent requests…");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [selectedNode, setSelectedNode] = useState<RequestNode | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,6 +31,7 @@ export default function Home() {
         if (!cancelled) {
           const payload = data as RequestsResponse;
           setRequests(payload.requests);
+          setSelectedNode(null);
           setStatus(`${payload.count} requests from the last 6 hours`);
           setUpdatedAt(new Date(payload.generated_at));
         }
@@ -48,11 +52,11 @@ export default function Home() {
         <div>
           <p className="eyebrow">Telehitch Insights</p>
           <h1>Live ride request map</h1>
-          <p className="hero-copy">Minimal six-hour view of pickup and dropoff demand. Darker blue dots are newer posts; larger dots indicate overlapping pickup or dropoff points.</p>
+          <p className="hero-copy">Minimal six-hour view of pickup and dropoff demand. Orange blinking dots show pickup and dropoff nodes; larger dots indicate overlapping pickup or dropoff points.</p>
         </div>
         <div className="stat-card">
           <span>Latest post</span>
-          <strong>{newest ? new Date(newest).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</strong>
+          <strong>{newest ? parseSingaporeDate(newest).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" }) : "—"}</strong>
           <small>{updatedAt ? `Refreshed ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Auto-refreshes every 15s"}</small>
         </div>
       </header>
@@ -70,13 +74,13 @@ export default function Home() {
         <div className="map-panel">
           <div className="panel-heading">
             <div><h2>{TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p></div>
-            <div className="legend"><span className="dot dark" /> Newer <span className="dot pale" /> Older</div>
+            <div className="legend"><span className="dot orange" /> Blinking node <span className="route-sample" /> Moving route</div>
           </div>
-          <TelehitchMap requests={requests} />
+          <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
         </div>
         <aside className="feed-panel">
-          <div className="panel-heading compact"><div><h2>Recent feed</h2><p>Last 40 posts</p></div></div>
-          <RequestFeed requests={requests} />
+          <div className="panel-heading compact"><div><h2>{selectedNode ? `${selectedNode.requests.length} ${selectedNode.kind === "pickup" ? "pick-up" : "drop-off"} request${selectedNode.requests.length === 1 ? "" : "s"}` : "Recent feed"}</h2><p>{selectedNode ? "Click the map background to return to the feed" : "Last 40 posts"}</p></div></div>
+          <RequestFeed requests={requests} selectedNode={selectedNode} />
         </aside>
       </section>
     </main>
