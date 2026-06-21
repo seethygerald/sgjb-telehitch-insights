@@ -51,6 +51,7 @@ function buildRecentSql(minutes: number, tab: RouteTab, limit: number) {
   return `SELECT ${SELECT_COLUMNS.join(",\n       ")}
 FROM ${tableName()}
 WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+  AND lower(coalesce(request_type, '')) = 'hitcher'
   AND pickup_latitude IS NOT NULL
   AND pickup_longitude IS NOT NULL
   AND dropoff_latitude IS NOT NULL
@@ -58,6 +59,14 @@ WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapo
   ${tabFilter(tab)}
 ORDER BY message_date_gmt8 DESC
 LIMIT ${limit}`;
+}
+
+function buildTrackedCountSql(minutes: number, tab: RouteTab) {
+  return `SELECT count(*) AS tracked_count
+FROM ${tableName()}
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+  AND lower(coalesce(request_type, '')) = 'hitcher'
+  ${tabFilter(tab)}`;
 }
 
 async function executeStatement(statement: string): Promise<DatabricksStatementResponse> {
@@ -157,4 +166,14 @@ export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit:
   const statement = buildRecentSql(minutes, tab, limit);
   const response = await executeStatement(statement);
   return rowsToRequests(response).filter((request) => isWithinRecentWindow(request, minutes));
+}
+
+export async function fetchTrackedRequestCount(minutes: number, tab: RouteTab) {
+  const statement = buildTrackedCountSql(minutes, tab);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
 }
