@@ -7,8 +7,8 @@ import "leaflet/dist/leaflet.css";
 import { TelehitchRequest } from "../lib/types";
 import { NodeDetails, RequestNode, NodeKind } from "../lib/mapNodes";
 
-const TILE_URL = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILE_ATTRIBUTION = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL ? "© OneMap, Singapore Land Authority" : "© OpenStreetMap contributors";
+const TILE_URL = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL || "https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION = "© OneMap, Singapore Land Authority";
 
 function pointKey(lat: number, lng: number) {
   return `${lat.toFixed(5)},${lng.toFixed(5)}`;

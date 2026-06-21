@@ -8,7 +8,7 @@ Browser requests never talk to Databricks directly. The app uses this flow:
 
 1. Next.js client polls `/api/requests/recent?tab=within-sg&minutes=360` every 15 seconds.
 2. The Vercel API route runs on the server and calls the Databricks SQL Statement Execution API.
-3. Databricks returns recent rows from `workspace.gold.gold_telehitch_requests` with complete pickup/dropoff coordinates.
+3. Databricks returns recent hitcher rows from `workspace.gold.gold_telehitch_requests` with complete pickup/dropoff coordinates, plus a tracked hitcher-request count for the same tab and time window.
 4. The browser renders pickup/dropoff dots and route lines on a Leaflet map.
 
 ## Local development
@@ -35,7 +35,7 @@ Set these as encrypted Vercel project environment variables:
 
 Optional public variable:
 
-- `NEXT_PUBLIC_ONEMAP_TILE_URL` — OneMap-compatible Leaflet tile URL. Defaults to `https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png` in `.env.example`; if unset, the app uses OpenStreetMap tiles for local fallback.
+- `NEXT_PUBLIC_ONEMAP_TILE_URL` — optional OneMap-compatible Leaflet tile URL override. If unset, the app uses OneMap Night at `https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png`.
 
 ## Deploying to free Vercel
 
@@ -48,7 +48,8 @@ Optional public variable:
 ## UI behavior
 
 - Two tabs: `Within SG` and `SG-JB`.
-- Both tabs show rows from the last 6 hours.
+- Both tabs show mappable hitcher rows from the last 6 hours and display the mappable count alongside the tracked hitcher-request count for the active tab.
 - Newer requests render in darker blue; older requests fade toward pale blue.
-- Dot radius increases when multiple requests share the same rounded pickup or dropoff coordinate.
-- Pickup and dropoff points are connected by route lines.
+- Orange pickup and dropoff nodes blink on the map.
+- Node radius increases when multiple requests share the same rounded pickup or dropoff coordinate.
+- Pickup and dropoff points are connected by blinking route lines animated from pickup toward dropoff.
