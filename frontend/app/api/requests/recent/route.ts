@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchRecentRequests, fetchTrackedRequestCount } from "../../../../lib/databricks";
+import { fetchRecentRequests, fetchGlobalTrackedRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
 
 export const runtime = "nodejs";
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   try {
     const [requests, trackedCount] = await Promise.all([
       fetchRecentRequests(minutes, tab, limit),
-      fetchTrackedRequestCount(minutes),
+      fetchGlobalTrackedRequestCount(minutes),
     ]);
     return NextResponse.json({
       generated_at: new Date().toISOString(),
