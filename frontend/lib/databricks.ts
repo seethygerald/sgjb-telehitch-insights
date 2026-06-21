@@ -65,7 +65,6 @@ function buildTrackedCountSql(minutes: number, tab: RouteTab) {
   return `SELECT count(*) AS tracked_count
 FROM ${tableName()}
 WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
-  AND lower(coalesce(request_type, '')) = 'hitcher'
   ${tabFilter(tab)}`;
 }
 
