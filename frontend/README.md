@@ -33,9 +33,9 @@ Set these as encrypted Vercel project environment variables:
 - `DATABRICKS_SCHEMA` — defaults to `gold`.
 - `DATABRICKS_TABLE` — defaults to `gold_telehitch_requests`.
 
-Optional public variable:
+Map tiles:
 
-- `NEXT_PUBLIC_ONEMAP_TILE_URL` — OneMap-compatible Leaflet tile URL. Defaults to `https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png` in `.env.example`; if unset, the app uses OpenStreetMap tiles for local fallback.
+- The map uses OneMap Night XYZ tiles at `https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png`.
 
 ## Deploying to free Vercel
 
@@ -50,5 +50,6 @@ Optional public variable:
 - Two tabs: `Within SG` and `SG-JB`.
 - Both tabs show mappable rows from the last 6 hours and display that count alongside the total request count for the same six-hour window.
 - Newer requests render in darker blue; older requests fade toward pale blue.
-- Dot radius increases when multiple requests share the same rounded pickup or dropoff coordinate.
-- Pickup and dropoff points are connected by route lines.
+- Orange pickup and dropoff nodes blink on the map.
+- Node radius increases when multiple requests share the same rounded pickup or dropoff coordinate.
+- Pickup and dropoff points are connected by blinking route lines animated from pickup toward dropoff.

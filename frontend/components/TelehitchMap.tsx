@@ -7,8 +7,9 @@ import "leaflet/dist/leaflet.css";
 import { TelehitchRequest } from "../lib/types";
 import { NodeDetails, RequestNode, NodeKind } from "../lib/mapNodes";
 
-const TILE_URL = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILE_ATTRIBUTION = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL ? "© OneMap, Singapore Land Authority" : "© OpenStreetMap contributors";
+const TILE_URL = "https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION =
+  '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:20px;width:20px;"/>&nbsp;<a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a>&nbsp;&copy;&nbsp;contributors&nbsp;&#124;&nbsp;<a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>';
 
 function pointKey(lat: number, lng: number) {
   return `${lat.toFixed(5)},${lng.toFixed(5)}`;
@@ -57,9 +58,9 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
   const nodes = useMemo(() => buildNodes(requests), [requests]);
 
   return (
-    <MapContainer center={[1.3521, 103.8198]} zoom={11} minZoom={9} className="map-canvas" scrollWheelZoom>
+    <MapContainer center={[1.3521, 103.8198]} zoom={11} minZoom={11} maxZoom={19} className="map-canvas" scrollWheelZoom>
       <MapBackgroundClick onClearSelection={onClearSelection} />
-      <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
+      <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} detectRetina maxZoom={19} minZoom={11} />
       {requests.map((request) => (
         <Polyline
           key={`route-${request.gold_request_id}`}

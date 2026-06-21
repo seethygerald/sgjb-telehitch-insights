@@ -50,7 +50,7 @@ function tabFilter(tab: RouteTab) {
 function buildRecentSql(minutes: number, tab: RouteTab, limit: number) {
   return `SELECT ${SELECT_COLUMNS.join(",\n       ")}
 FROM ${tableName()}
-WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+WHERE message_date_gmt8 >= current_timestamp() - interval ${minutes} minutes
   AND pickup_latitude IS NOT NULL
   AND pickup_longitude IS NOT NULL
   AND dropoff_latitude IS NOT NULL
@@ -110,7 +110,9 @@ function parseString(value: unknown): string | null {
 
 function parseSingaporeTimestamp(value: string) {
   const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
-  return new Date(hasTimezone ? value : `${value.replace(" ", "T")}+08:00`).getTime();
+  const normalizedFraction = value.replace(/\.(\d{3})\d+/, ".$1");
+  const normalized = (hasTimezone ? normalizedFraction : `${normalizedFraction}+08:00`).replace(" ", "T");
+  return new Date(normalized).getTime();
 }
 
 function isWithinRecentWindow(request: TelehitchRequest, minutes: number) {
@@ -162,7 +164,37 @@ function rowsToRequests(response: DatabricksStatementResponse): TelehitchRequest
 export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit: number) {
   const statement = buildRecentSql(minutes, tab, limit);
   const response = await executeStatement(statement);
-  return rowsToRequests(response).filter((request) => isWithinRecentWindow(request, minutes));
+  return rowsToRequests(response);
+}
+
+export async function fetchGlobalTrackedRequestCount(minutes: number) {
+  const statement = buildGlobalTrackedCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+export async function fetchGlobalTrackedRequestCount(minutes: number) {
+  const statement = buildGlobalTrackedCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+export async function fetchTotalRequestCount(minutes: number) {
+  const statement = buildTotalCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
 }
 
 export async function fetchTotalRequestCount(minutes: number) {
