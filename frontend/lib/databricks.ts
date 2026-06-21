@@ -196,3 +196,13 @@ export async function fetchTotalRequestCount(minutes: number) {
 
   return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
 }
+
+export async function fetchTotalRequestCount(minutes: number) {
+  const statement = buildTotalCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
