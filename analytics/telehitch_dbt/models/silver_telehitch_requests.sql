@@ -139,10 +139,22 @@ extracted as (
 flag_cleaned as (
     select
         *,
-        nullif(trim(regexp_replace(pickup_location_raw, '[🇸🇬🇲🇾]', '')), '')
-            as pickup_location_without_flags,
-        nullif(trim(regexp_replace(dropoff_location_raw, '[🇸🇬🇲🇾]', '')), '')
-            as dropoff_location_without_flags
+        nullif(
+            trim(regexp_replace(
+                trim(regexp_replace(pickup_location_raw, '[🇸🇬🇲🇾]', '')),
+                '\\.+$',
+                ''
+            )),
+            ''
+        ) as pickup_location_without_flags,
+        nullif(
+            trim(regexp_replace(
+                trim(regexp_replace(dropoff_location_raw, '[🇸🇬🇲🇾]', '')),
+                '\\.+$',
+                ''
+            )),
+            ''
+        ) as dropoff_location_without_flags
     from extracted
 ),
 
