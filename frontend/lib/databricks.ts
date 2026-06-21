@@ -51,6 +51,7 @@ function buildRecentSql(minutes: number, tab: RouteTab, limit: number) {
   return `SELECT ${SELECT_COLUMNS.join(",\n       ")}
 FROM ${tableName()}
 WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+  AND lower(coalesce(request_type, '')) = 'hitcher'
   AND pickup_latitude IS NOT NULL
   AND pickup_longitude IS NOT NULL
   AND dropoff_latitude IS NOT NULL
