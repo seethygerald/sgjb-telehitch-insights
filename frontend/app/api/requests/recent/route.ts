@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchRecentRequests } from "../../../../lib/databricks";
+import { fetchRecentRequests, fetchGlobalTrackedRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
 
 export const runtime = "nodejs";

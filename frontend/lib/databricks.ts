@@ -50,7 +50,7 @@ function tabFilter(tab: RouteTab) {
 function buildRecentSql(minutes: number, tab: RouteTab, limit: number) {
   return `SELECT ${SELECT_COLUMNS.join(",\n       ")}
 FROM ${tableName()}
-WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+WHERE message_date_gmt8 >= current_timestamp() - interval ${minutes} minutes
   AND pickup_latitude IS NOT NULL
   AND pickup_longitude IS NOT NULL
   AND dropoff_latitude IS NOT NULL
@@ -58,6 +58,12 @@ WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapo
   ${tabFilter(tab)}
 ORDER BY message_date_gmt8 DESC
 LIMIT ${limit}`;
+}
+
+function buildGlobalTrackedCountSql(minutes: number) {
+  return `SELECT count(*) AS tracked_count
+FROM ${tableName()}
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes`;
 }
 
 async function executeStatement(statement: string): Promise<DatabricksStatementResponse> {
@@ -158,5 +164,25 @@ function rowsToRequests(response: DatabricksStatementResponse): TelehitchRequest
 export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit: number) {
   const statement = buildRecentSql(minutes, tab, limit);
   const response = await executeStatement(statement);
-  return rowsToRequests(response).filter((request) => isWithinRecentWindow(request, minutes));
+  return rowsToRequests(response);
+}
+
+export async function fetchGlobalTrackedRequestCount(minutes: number) {
+  const statement = buildGlobalTrackedCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+export async function fetchGlobalTrackedRequestCount(minutes: number) {
+  const statement = buildGlobalTrackedCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
 }
