@@ -52,7 +52,7 @@ export default function Home() {
         <div>
           <p className="eyebrow">Telehitch Insights</p>
           <h1>Live ride request map</h1>
-          <p className="hero-copy">Minimal six-hour view of pickup and dropoff demand. Orange blinking dots show pickup and dropoff nodes; larger dots indicate overlapping pickup or dropoff points.</p>
+          <p className="hero-copy">Minimal six-hour view of pickup and dropoff demand. Blue blinking dots show pickup and dropoff nodes; larger dots indicate overlapping pickup or dropoff points.</p>
         </div>
         <div className="stat-card">
           <span>Latest post</span>
@@ -74,7 +74,7 @@ export default function Home() {
         <div className="map-panel">
           <div className="panel-heading">
             <div><h2>{TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p></div>
-            <div className="legend"><span className="dot orange" /> Blinking node <span className="route-sample" /> Moving route</div>
+            <div className="legend"><span className="dot blue" /> Blinking node <span className="route-sample" /> Moving route</div>
           </div>
           <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
         </div>

@@ -50,7 +50,7 @@ function tabFilter(tab: RouteTab) {
 function buildRecentSql(minutes: number, tab: RouteTab, limit: number) {
   return `SELECT ${SELECT_COLUMNS.join(",\n       ")}
 FROM ${tableName()}
-WHERE message_date_gmt8 >= current_timestamp() - interval ${minutes} minutes
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
   AND request_type = 'hitcher_request'
   AND pickup_latitude IS NOT NULL
   AND pickup_longitude IS NOT NULL
@@ -166,7 +166,7 @@ function rowsToRequests(response: DatabricksStatementResponse): TelehitchRequest
 export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit: number) {
   const statement = buildRecentSql(minutes, tab, limit);
   const response = await executeStatement(statement);
-  return rowsToRequests(response);
+  return rowsToRequests(response).filter((request) => isWithinRecentWindow(request, minutes));
 }
 
 export async function fetchTotalRequestCount(minutes: number) {

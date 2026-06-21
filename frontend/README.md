@@ -50,6 +50,6 @@ Map tiles:
 - Two tabs: `Within SG` and `SG-JB`.
 - Both tabs show mappable hitcher requests from the last 6 hours and display that count alongside the total hitcher request count scraped during the same six-hour window.
 - Newer requests render in darker blue; older requests fade toward pale blue.
-- Orange pickup and dropoff nodes blink on the map.
+- Blue pickup and dropoff nodes blink on the map.
 - Node radius increases when multiple requests share the same rounded pickup or dropoff coordinate.
 - Pickup and dropoff points are connected by blinking route lines animated from pickup toward dropoff.
