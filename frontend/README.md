@@ -35,7 +35,7 @@ Set these as encrypted Vercel project environment variables:
 
 Map tiles:
 
-- The map uses OneMap Night XYZ tiles at `https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png`.
+- The map uses OneMap GreyLite XYZ tiles at `https://www.onemap.gov.sg/maps/tiles/GreyLite/{z}/{x}/{y}.png`.
 
 ## Deploying to free Vercel
 
@@ -48,8 +48,8 @@ Map tiles:
 ## UI behavior
 
 - Two tabs: `Within SG` and `SG-JB`.
-- Both tabs show mappable rows from the last 6 hours and display that count alongside the total request count for the same six-hour window.
+- Both tabs show mappable hitcher requests from the last 6 hours and display that count alongside the total hitcher request count scraped during the same six-hour window.
 - Newer requests render in darker blue; older requests fade toward pale blue.
-- Orange pickup and dropoff nodes blink on the map.
+- Blue pickup and dropoff nodes blink on the map.
 - Node radius increases when multiple requests share the same rounded pickup or dropoff coordinate.
 - Pickup and dropoff points are connected by blinking route lines animated from pickup toward dropoff.

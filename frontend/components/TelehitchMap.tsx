@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { TelehitchRequest } from "../lib/types";
 import { NodeDetails, RequestNode, NodeKind } from "../lib/mapNodes";
 
-const TILE_URL = "https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png";
+const TILE_URL = "https://www.onemap.gov.sg/maps/tiles/GreyLite/{z}/{x}/{y}.png";
 const TILE_ATTRIBUTION =
   '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:20px;width:20px;"/>&nbsp;<a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a>&nbsp;&copy;&nbsp;contributors&nbsp;&#124;&nbsp;<a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>';
 
@@ -65,7 +65,7 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
         <Polyline
           key={`route-${request.gold_request_id}`}
           positions={[[request.pickup_latitude, request.pickup_longitude], [request.dropoff_latitude, request.dropoff_longitude]]}
-          pathOptions={{ color: "#f97316", weight: 3, opacity: 0.7, className: "telehitch-route" }}
+          pathOptions={{ color: "#0f56b3", weight: 3, opacity: 0.7, className: "telehitch-route" }}
         />
       ))}
       {nodes.map((node) => (
