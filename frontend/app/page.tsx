@@ -32,7 +32,7 @@ export default function Home() {
           const payload = data as RequestsResponse;
           setRequests(payload.requests);
           setSelectedNode(null);
-          setStatus(`${payload.count} requests from the last 6 hours`);
+          setStatus(`${payload.count} mappable requests (out of ${payload.total_count} total requests) made over the last 6 hours`);
           setUpdatedAt(new Date(payload.generated_at));
         }
       } catch (error) {

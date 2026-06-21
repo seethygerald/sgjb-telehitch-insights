@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchRecentRequests } from "../../../../lib/databricks";
+import { fetchRecentRequests, fetchTotalRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
 
 export const runtime = "nodejs";
@@ -22,8 +22,18 @@ export async function GET(request: NextRequest) {
   const tab = parseTab(params.get("tab"));
 
   try {
-    const requests = await fetchRecentRequests(minutes, tab, limit);
-    return NextResponse.json({ generated_at: new Date().toISOString(), minutes, tab, count: requests.length, requests });
+    const [requests, totalCount] = await Promise.all([
+      fetchRecentRequests(minutes, tab, limit),
+      fetchTotalRequestCount(minutes),
+    ]);
+    return NextResponse.json({
+      generated_at: new Date().toISOString(),
+      minutes,
+      tab,
+      count: requests.length,
+      total_count: totalCount,
+      requests,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
