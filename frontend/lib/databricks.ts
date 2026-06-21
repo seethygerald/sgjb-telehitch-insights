@@ -61,11 +61,10 @@ ORDER BY message_date_gmt8 DESC
 LIMIT ${limit}`;
 }
 
-function buildTrackedCountSql(minutes: number, tab: RouteTab) {
+function buildTrackedCountSql(minutes: number) {
   return `SELECT count(*) AS tracked_count
 FROM ${tableName()}
-WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
-  ${tabFilter(tab)}`;
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes`;
 }
 
 async function executeStatement(statement: string): Promise<DatabricksStatementResponse> {
@@ -111,8 +110,12 @@ function parseString(value: unknown): string | null {
 }
 
 function parseSingaporeTimestamp(value: string) {
-  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
-  return new Date(hasTimezone ? value : `${value.replace(" ", "T")}+08:00`).getTime();
+  const normalized = value
+    .trim()
+    .replace(" ", "T")
+    .replace(/(\.\d{3})\d+/, "$1");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}+08:00`).getTime();
 }
 
 function isWithinRecentWindow(request: TelehitchRequest, minutes: number) {
@@ -167,8 +170,8 @@ export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit:
   return rowsToRequests(response).filter((request) => isWithinRecentWindow(request, minutes));
 }
 
-export async function fetchTrackedRequestCount(minutes: number, tab: RouteTab) {
-  const statement = buildTrackedCountSql(minutes, tab);
+export async function fetchTrackedRequestCount(minutes: number) {
+  const statement = buildTrackedCountSql(minutes);
   const response = await executeStatement(statement);
   if (response.status.state !== "SUCCEEDED") {
     throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);

@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   try {
     const [requests, trackedCount] = await Promise.all([
       fetchRecentRequests(minutes, tab, limit),
-      fetchTrackedRequestCount(minutes, tab),
+      fetchTrackedRequestCount(minutes),
     ]);
     return NextResponse.json({
       generated_at: new Date().toISOString(),
