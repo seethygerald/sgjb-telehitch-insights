@@ -1,68 +1,84 @@
 "use client";
 
-import { Fragment } from "react";
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from "react-leaflet";
+import { useMemo } from "react";
+import { divIcon } from "leaflet";
+import { MapContainer, Marker, Polyline, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { TelehitchRequest } from "../lib/types";
+import { NodeDetails, RequestNode, NodeKind } from "../lib/mapNodes";
 
 const TILE_URL = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_ATTRIBUTION = process.env.NEXT_PUBLIC_ONEMAP_TILE_URL ? "© OneMap, Singapore Land Authority" : "© OpenStreetMap contributors";
-
-function ageRatio(date: string) {
-  const ageMs = Date.now() - new Date(date).getTime();
-  return Math.min(Math.max(ageMs / (6 * 60 * 60 * 1000), 0), 1);
-}
 
 function pointKey(lat: number, lng: number) {
   return `${lat.toFixed(5)},${lng.toFixed(5)}`;
 }
 
-export default function TelehitchMap({ requests }: { requests: TelehitchRequest[] }) {
-  const pickupCounts = new Map<string, number>();
-  const dropoffCounts = new Map<string, number>();
+function nodeKey(request: TelehitchRequest, kind: NodeKind) {
+  return kind === "pickup"
+    ? pointKey(request.pickup_latitude, request.pickup_longitude)
+    : pointKey(request.dropoff_latitude, request.dropoff_longitude);
+}
+
+function buildNodes(requests: TelehitchRequest[]) {
+  const nodes = new Map<string, RequestNode>();
   for (const request of requests) {
-    pickupCounts.set(pointKey(request.pickup_latitude, request.pickup_longitude), (pickupCounts.get(pointKey(request.pickup_latitude, request.pickup_longitude)) ?? 0) + 1);
-    dropoffCounts.set(pointKey(request.dropoff_latitude, request.dropoff_longitude), (dropoffCounts.get(pointKey(request.dropoff_latitude, request.dropoff_longitude)) ?? 0) + 1);
+    for (const kind of ["pickup", "dropoff"] as const) {
+      const lat = kind === "pickup" ? request.pickup_latitude : request.dropoff_latitude;
+      const lng = kind === "pickup" ? request.pickup_longitude : request.dropoff_longitude;
+      const id = `${kind}:${nodeKey(request, kind)}`;
+      const existing = nodes.get(id);
+      if (existing) {
+        existing.requests.push(request);
+      } else {
+        nodes.set(id, { id, kind, position: [lat, lng], requests: [request] });
+      }
+    }
   }
+  return Array.from(nodes.values());
+}
+
+function nodeIcon(count: number, kind: NodeKind) {
+  const size = 18 + Math.min(count - 1, 10) * 3;
+  return divIcon({
+    className: "telehitch-node-wrapper",
+    html: `<span class="telehitch-node telehitch-node-${kind}" style="width:${size}px;height:${size}px"><span>${count > 1 ? count : ""}</span></span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function MapBackgroundClick({ onClearSelection }: { onClearSelection: () => void }) {
+  useMapEvents({ click: onClearSelection });
+  return null;
+}
+
+export default function TelehitchMap({ requests, onSelectNode, onClearSelection }: { requests: TelehitchRequest[]; onSelectNode: (node: RequestNode) => void; onClearSelection: () => void }) {
+  const nodes = useMemo(() => buildNodes(requests), [requests]);
 
   return (
     <MapContainer center={[1.3521, 103.8198]} zoom={11} minZoom={9} className="map-canvas" scrollWheelZoom>
+      <MapBackgroundClick onClearSelection={onClearSelection} />
       <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} />
-      {requests.map((request) => {
-        const freshness = 1 - ageRatio(request.message_date_gmt8);
-        const color = `rgba(15, ${Math.round(72 + freshness * 70)}, ${Math.round(160 + freshness * 70)}, ${0.22 + freshness * 0.78})`;
-        const pickupCount = pickupCounts.get(pointKey(request.pickup_latitude, request.pickup_longitude)) ?? 1;
-        const dropoffCount = dropoffCounts.get(pointKey(request.dropoff_latitude, request.dropoff_longitude)) ?? 1;
-        const route = [[request.pickup_latitude, request.pickup_longitude], [request.dropoff_latitude, request.dropoff_longitude]] as [number, number][];
-
-        return (
-          <Fragment key={request.gold_request_id}>
-            <Polyline positions={route} pathOptions={{ color, weight: 2, opacity: 0.35 }} />
-            <CircleMarker center={route[0]} radius={5 + Math.min(pickupCount, 12)} pathOptions={{ color, fillColor: color, fillOpacity: 0.82, weight: 1 }}>
-              <Popup><PopupBody request={request} kind="Pickup" /></Popup>
-            </CircleMarker>
-            <CircleMarker center={route[1]} radius={5 + Math.min(dropoffCount, 12)} pathOptions={{ color, fillColor: color, fillOpacity: 0.52, weight: 1, dashArray: "3" }}>
-              <Popup><PopupBody request={request} kind="Dropoff" /></Popup>
-            </CircleMarker>
-          </Fragment>
-        );
-      })}
+      {requests.map((request) => (
+        <Polyline
+          key={`route-${request.gold_request_id}`}
+          positions={[[request.pickup_latitude, request.pickup_longitude], [request.dropoff_latitude, request.dropoff_longitude]]}
+          pathOptions={{ color: "#f97316", weight: 3, opacity: 0.7, className: "telehitch-route" }}
+        />
+      ))}
+      {nodes.map((node) => (
+        <Marker
+          key={node.id}
+          position={node.position}
+          icon={nodeIcon(node.requests.length, node.kind)}
+          eventHandlers={{ click: (event) => { event.originalEvent.stopPropagation(); onSelectNode(node); } }}
+        >
+          <Tooltip direction="top" offset={[0, -8]} opacity={1} sticky>
+            {node.requests.length > 1 ? <strong>{node.requests.length} requests (click for more info)</strong> : <NodeDetails request={node.requests[0]} kind={node.kind} />}
+          </Tooltip>
+        </Marker>
+      ))}
     </MapContainer>
-  );
-}
-
-function PopupBody({ request, kind }: { request: TelehitchRequest; kind: "Pickup" | "Dropoff" }) {
-  const location = kind === "Pickup" ? request.pickup_location : request.dropoff_location;
-  const address = kind === "Pickup" ? request.pickup_formatted_address : request.dropoff_formatted_address;
-  const postal = kind === "Pickup" ? request.pickup_postal_code : request.dropoff_postal_code;
-  return (
-    <div className="popup-card">
-      <strong>{kind}: {location || "Unknown"}</strong>
-      <span>{address || "No formatted address"}</span>
-      {postal ? <span>Postal: {postal}</span> : null}
-      <span>{new Date(request.message_date_gmt8).toLocaleString()}</span>
-      <span>{request.pax_count ? `${request.pax_count} pax` : "Pax unknown"} · {request.channel || "Unknown channel"}</span>
-      {request.message ? <p>{request.message}</p> : null}
-    </div>
   );
 }
