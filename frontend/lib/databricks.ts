@@ -104,7 +104,9 @@ function parseString(value: unknown): string | null {
 
 function parseSingaporeTimestamp(value: string) {
   const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
-  return new Date(hasTimezone ? value : `${value.replace(" ", "T")}+08:00`).getTime();
+  const normalizedFraction = value.replace(/\.(\d{3})\d+/, ".$1");
+  const normalized = (hasTimezone ? normalizedFraction : `${normalizedFraction}+08:00`).replace(" ", "T");
+  return new Date(normalized).getTime();
 }
 
 function isWithinRecentWindow(request: TelehitchRequest, minutes: number) {

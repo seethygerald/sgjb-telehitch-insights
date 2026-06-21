@@ -23,7 +23,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const requests = await fetchRecentRequests(minutes, tab, limit);
-    return NextResponse.json({ generated_at: new Date().toISOString(), minutes, tab, count: requests.length, requests });
+    return NextResponse.json({
+      generated_at: new Date().toISOString(),
+      minutes,
+      tab,
+      count: requests.length,
+      requests,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
