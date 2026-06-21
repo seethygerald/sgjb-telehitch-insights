@@ -33,9 +33,9 @@ Set these as encrypted Vercel project environment variables:
 - `DATABRICKS_SCHEMA` — defaults to `gold`.
 - `DATABRICKS_TABLE` — defaults to `gold_telehitch_requests`.
 
-Optional public variable:
+Map tiles:
 
-- `NEXT_PUBLIC_ONEMAP_TILE_URL` — optional OneMap-compatible Leaflet tile URL override. If unset, the app uses OneMap Night HD at `https://www.onemap.gov.sg/maps/tiles/Night_HD/{z}/{x}/{y}.png`.
+- The map uses OneMap Night XYZ tiles at `https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png`.
 
 ## Deploying to free Vercel
 

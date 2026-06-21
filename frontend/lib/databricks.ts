@@ -108,6 +108,19 @@ function parseString(value: unknown): string | null {
   return String(value);
 }
 
+function parseSingaporeTimestamp(value: string) {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
+  const normalizedFraction = value.replace(/\.(\d{3})\d+/, ".$1");
+  const normalized = (hasTimezone ? normalizedFraction : `${normalizedFraction}+08:00`).replace(" ", "T");
+  return new Date(normalized).getTime();
+}
+
+function isWithinRecentWindow(request: TelehitchRequest, minutes: number) {
+  const messageTime = parseSingaporeTimestamp(request.message_date_gmt8);
+  if (!Number.isFinite(messageTime)) return false;
+  return messageTime >= Date.now() - minutes * 60 * 1000;
+}
+
 function rowsToRequests(response: DatabricksStatementResponse): TelehitchRequest[] {
   if (response.status.state !== "SUCCEEDED") {
     throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
@@ -152,6 +165,16 @@ export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit:
   const statement = buildRecentSql(minutes, tab, limit);
   const response = await executeStatement(statement);
   return rowsToRequests(response);
+}
+
+export async function fetchGlobalTrackedRequestCount(minutes: number) {
+  const statement = buildGlobalTrackedCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
 }
 
 export async function fetchGlobalTrackedRequestCount(minutes: number) {
