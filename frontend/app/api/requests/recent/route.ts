@@ -22,16 +22,12 @@ export async function GET(request: NextRequest) {
   const tab = parseTab(params.get("tab"));
 
   try {
-    const [requests, trackedCount] = await Promise.all([
-      fetchRecentRequests(minutes, tab, limit),
-      fetchGlobalTrackedRequestCount(minutes),
-    ]);
+    const requests = await fetchRecentRequests(minutes, tab, limit);
     return NextResponse.json({
       generated_at: new Date().toISOString(),
       minutes,
       tab,
       count: requests.length,
-      tracked_count: trackedCount,
       requests,
     });
   } catch (error) {
