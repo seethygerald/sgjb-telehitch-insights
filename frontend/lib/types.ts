@@ -35,6 +35,7 @@ export type RequestsResponse = {
   minutes: number;
   tab: RouteTab;
   count: number;
+  total_count: number;
   requests: TelehitchRequest[];
 };
 
