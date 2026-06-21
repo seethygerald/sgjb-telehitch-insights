@@ -60,8 +60,8 @@ ORDER BY message_date_gmt8 DESC
 LIMIT ${limit}`;
 }
 
-function buildGlobalTrackedCountSql(minutes: number) {
-  return `SELECT count(*) AS tracked_count
+function buildTotalCountSql(minutes: number) {
+  return `SELECT count(*) AS total_count
 FROM ${tableName()}
 WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes`;
 }
@@ -179,6 +179,16 @@ export async function fetchGlobalTrackedRequestCount(minutes: number) {
 
 export async function fetchGlobalTrackedRequestCount(minutes: number) {
   const statement = buildGlobalTrackedCountSql(minutes);
+  const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+export async function fetchTotalRequestCount(minutes: number) {
+  const statement = buildTotalCountSql(minutes);
   const response = await executeStatement(statement);
   if (response.status.state !== "SUCCEEDED") {
     throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
