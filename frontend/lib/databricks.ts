@@ -69,7 +69,7 @@ function buildDashboardSql() {
   SELECT explode(array('hitcher_request', 'driver_request')) AS request_type
 ), buckets AS (
   SELECT explode(sequence(
-    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 24 hours),
+    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 300 hours),
     date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore')),
     interval 15 minutes
   )) AS bucket_start
@@ -101,7 +101,7 @@ function buildDashboardSql() {
 ), live AS (
   SELECT
     rt.request_type,
-    count(DISTINCT base.gold_request_id) AS total_count
+    count(base.request_type) AS total_count
   FROM request_types rt
   LEFT JOIN base
     ON base.request_type = rt.request_type
@@ -138,11 +138,11 @@ WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapo
   AND request_type = '${requestType}'`;
 }
 
-function buildLatestRequestTimeSql(minutes: number, requestType: RequestType) {
+function buildLatestRequestTimeSql(minutes: number, requestType?: RequestType) {
   return `SELECT CAST(max(message_date_gmt8) AS STRING) AS latest_post_at
 FROM ${tableName()}
-WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
-  AND request_type = '${requestType}'`;
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes${requestType ? `
+  AND request_type = '${requestType}'` : ""}`;
 }
 
 function buildTotalCountSql(minutes: number) {
@@ -330,7 +330,7 @@ export async function fetchUniqueRequestCount(minutes: number, requestType: Requ
 }
 
 
-export async function fetchLatestRequestTime(minutes: number, requestType: RequestType) {
+export async function fetchLatestRequestTime(minutes: number, requestType?: RequestType) {
   const response = await executeStatement(buildLatestRequestTimeSql(minutes, requestType));
   if (response.status.state !== "SUCCEEDED") {
     throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);

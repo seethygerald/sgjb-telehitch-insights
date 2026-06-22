@@ -38,9 +38,14 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .map-loading { display: grid; place-items: center; color: var(--muted); }
 .feed-panel { max-height: 745px; }
 .feed-list { height: 680px; overflow: auto; padding: 12px; display: grid; gap: 10px; align-content: start; }
-.feed-card { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: #fff; }
-.feed-card-topline { display: flex; justify-content: space-between; gap: 8px; color: var(--blue); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-.feed-card h3 { margin: 8px 0; font-size: 15px; line-height: 1.35; letter-spacing: -.02em; }
+.feed-card { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: #fff; color: var(--ink); display: grid; gap: 8px; }
+.feed-card.clickable { cursor: pointer; }
+.feed-card.clickable:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
+.feed-card.expanded { border-color: #a9c9ff; box-shadow: inset 0 0 0 1px #c7dbff; }
+.feed-card-details { display: grid; gap: 3px; }
+.feed-card-details strong { color: var(--ink); }
+.feed-card-topline { display: flex; justify-content: space-between; gap: 8px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.feed-card h3 { margin: 0; font-size: 15px; line-height: 1.35; letter-spacing: -.02em; }
 .feed-card p { margin: 0; font-size: 13px; }
 .popup-card { display: grid; gap: 4px; max-width: 260px; }
 .popup-card span { color: #475467; }
@@ -76,9 +81,11 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 }
 .telehitch-node-dropoff { background: #3b82f6; }
 .telehitch-route {
-  animation: telehitch-route-blink 1.35s ease-in-out infinite, telehitch-route-flow .8s linear infinite;
-  stroke-dasharray: 10 12;
+  animation: telehitch-route-flow .8s linear infinite;
+  stroke-dasharray: 2 12;
   stroke-linecap: round;
+  stroke-opacity: .7;
+  will-change: stroke-dashoffset;
 }
 .route-sample {
   animation: telehitch-route-flow .8s linear infinite;
@@ -98,11 +105,12 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
   50% { opacity: 1; transform: scale(1.08); box-shadow: 0 0 0 10px rgba(15, 86, 179, 0), 0 10px 26px rgba(15, 86, 179, .4); }
 }
 @keyframes telehitch-route-blink {
-  0%, 100% { opacity: .28; }
-  50% { opacity: .9; }
+  0%, 100% { opacity: .35; stroke-opacity: .25; }
+  50% { opacity: 1; stroke-opacity: .95; }
 }
 @keyframes telehitch-route-flow {
-  to { stroke-dashoffset: -22; background-position: 12px 0; }
+  from { stroke-dashoffset: 0; background-position: 0 0; }
+  to { stroke-dashoffset: -14; background-position: 12px 0; }
 }
 
 .app-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; width: min(1680px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0; }
@@ -116,18 +124,18 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .tab:disabled { pointer-events: none; }
 .tab span em { margin-left: 8px; font-style: normal; font-weight: 400; }
 .recency-gradient { width: 74px; height: 10px; border-radius: 999px; border: 1px solid #c7dbff; background: linear-gradient(90deg, hsl(213 76% 72%), hsl(213 90% 36%)); display: inline-block; }
-.dashboard-metrics { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, .6fr); gap: 16px; }
+.dashboard-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .metric-panel { border: 1px solid var(--line); background: rgba(255,255,255,.86); box-shadow: 0 24px 70px rgba(16,24,40,.08); border-radius: 28px; overflow: hidden; min-height: 360px; }
 .metric-body { min-height: 290px; padding: 22px; display: grid; gap: 12px; align-content: start; }
 .metric-body strong { font-size: clamp(42px, 6vw, 76px); line-height: .95; letter-spacing: -.07em; color: var(--blue); }
 .metric-body span, .loading-copy { color: var(--muted); }
 .maintenance-message { border: 1px solid #fed7aa; background: #fff7ed; color: #9a3412; border-radius: 18px; padding: 16px; margin: 0; line-height: 1.5; }
 .mini-chart { height: 170px; display: flex; align-items: flex-end; gap: 3px; padding: 14px 0 0; border-top: 1px solid var(--line); }
-.mini-bar { flex: 1; min-width: 3px; border-radius: 999px 999px 0 0; background: linear-gradient(180deg, #0f56b3, #93c5fd); }
+.mini-bar { flex: 1; min-width: 3px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #0f56b3, #93c5fd); }
 .live-count { min-height: 290px; align-content: center; justify-items: center; text-align: center; }
 .telehitch-node { background: var(--node-color, var(--blue)); box-shadow: 0 0 0 0 var(--node-shadow, rgba(15, 86, 179, .55)), 0 8px 22px var(--node-shadow, rgba(15, 86, 179, .32)); }
 .telehitch-node-dropoff { background: var(--node-color, #3b82f6); }
-.telehitch-route { animation: telehitch-route-blink 1.35s ease-in-out infinite, telehitch-route-flow .8s linear infinite; stroke-dasharray: 2 12 !important; stroke-linecap: round; }
+.telehitch-route { animation: telehitch-route-flow .8s linear infinite; stroke-dasharray: 2 12 !important; stroke-linecap: round; stroke-opacity: .7; will-change: stroke-dashoffset; }
 
 @media (max-width: 1120px) {
   .app-layout { grid-template-columns: 1fr; }
@@ -156,7 +164,7 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .mini-chart { align-items: stretch; padding-bottom: 28px; position: relative; }
 .mini-bar-slot { align-items: flex-end; display: flex; flex: 1; height: 100%; min-width: 4px; position: relative; }
 .mini-bar-slot .mini-bar { width: 100%; }
-.mini-bar-slot span { bottom: -22px; color: var(--muted); font-size: 10px; left: 50%; position: absolute; transform: translateX(-50%) rotate(-35deg); transform-origin: top center; white-space: nowrap; }
+.mini-bar-slot span { bottom: -22px; color: var(--muted); font-size: 10px; left: 50%; position: absolute; transform: translateX(-50%); transform-origin: top center; white-space: nowrap; }
 .map-panel .leaflet-container { background: var(--panel); }
 .map-panel .leaflet-tile-container img { outline: 1px solid transparent; }
 .tracker-legend-block { display: grid; gap: 6px; margin: -12px 0 16px; }
@@ -166,14 +174,14 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .daily-line-chart circle { cursor: pointer; fill: #fff; stroke: var(--blue); stroke-width: 3; vector-effect: non-scaling-stroke; }
 .daily-axis { color: var(--muted); display: flex; font-size: 11px; justify-content: space-between; margin-top: -6px; }
 .map-canvas, .map-loading { height: 560px; }
-.feed-list { height: 560px; }
-.feed-panel { max-height: 625px; }
-@media (max-width: 640px) { .map-canvas, .map-loading, .feed-list { height: 440px; } }
+.feed-list { height: 630px; padding-bottom: 28px; }
+.feed-panel { max-height: 695px; }
+@media (max-width: 640px) { .map-canvas, .map-loading, .feed-list { height: 480px; } }
 .chart-with-axis { display: grid; gap: 8px; grid-template-columns: 42px minmax(0, 1fr); }
 .chart-y-axis { color: var(--muted); display: flex; flex-direction: column; font-size: 11px; justify-content: space-between; padding: 0 0 28px; text-align: right; }
 .daily-bar-chart .mini-bar { background: linear-gradient(180deg, #2563eb, #bfdbfe); }
 .tooltip-target { position: relative; }
-.tooltip-target::after { background: #172033; border-radius: 8px; bottom: calc(100% + 8px); color: #fff; content: attr(data-tooltip); font-size: 12px; left: 50%; opacity: 0; padding: 6px 8px; pointer-events: none; position: absolute; transform: translate(-50%, 4px); transition: opacity .12s ease .5s, transform .12s ease .5s; white-space: nowrap; z-index: 500; }
+.tooltip-target::after { background: #172033; border-radius: 8px; bottom: calc(100% + 8px); color: #fff; content: attr(data-tooltip); font-size: 12px; left: 50%; opacity: 0; padding: 6px 8px; pointer-events: none; position: absolute; transform: translate(-50%, 4px); transition: opacity .05s ease, transform .05s ease; white-space: nowrap; z-index: 500; }
 .tooltip-target:hover::after { opacity: 1; transform: translate(-50%, 0); }
 .feed-note { color: var(--muted); font-size: 12px; margin-top: 6px; }
 .map-heading-copy .legend { margin: 0 0 2px; }
