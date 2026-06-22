@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { fetchRecentRequests, fetchTotalRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
 
+const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest) {
       requests,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("Recent requests Databricks request failed", error);
+    return NextResponse.json({ error: MAINTENANCE_MESSAGE }, { status: 503 });
   }
 }

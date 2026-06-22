@@ -1,4 +1,4 @@
-import { DatabricksStatementResponse, RouteTab, TelehitchRequest } from "./types";
+import { DashboardPoint, DatabricksStatementResponse, RouteTab, TelehitchRequest } from "./types";
 
 const SELECT_COLUMNS = [
   "gold_request_id", "silver_request_id", "channel", "topic_id", "message_id", "message_date_gmt8", "scraped_at_gmt8",
@@ -59,6 +59,41 @@ WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapo
   ${tabFilter(tab)}
 ORDER BY message_date_gmt8 DESC
 LIMIT ${limit}`;
+}
+
+
+function buildDashboardSql(tab: RouteTab) {
+  return `WITH buckets AS (
+  SELECT explode(sequence(
+    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 24 hours),
+    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore')),
+    interval 15 minutes
+  )) AS bucket_start
+), base AS (
+  SELECT message_date_gmt8
+  FROM ${tableName()}
+  WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 30 hours
+    AND request_type = 'hitcher_request'
+    ${tabFilter(tab)}
+), rolling AS (
+  SELECT
+    b.bucket_start,
+    count(base.message_date_gmt8) AS total_count
+  FROM buckets b
+  LEFT JOIN base
+    ON base.message_date_gmt8 > b.bucket_start - interval 6 hours
+   AND base.message_date_gmt8 <= b.bucket_start
+  GROUP BY b.bucket_start
+)
+SELECT 'rolling' AS metric, CAST(bucket_start AS STRING) AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
+FROM rolling
+UNION ALL
+SELECT 'live_15m' AS metric, NULL AS bucket_start_gmt8, CAST(count(*) AS DOUBLE) AS metric_value
+FROM ${tableName()}
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 15 minutes
+  AND request_type = 'hitcher_request'
+  ${tabFilter(tab)}
+ORDER BY metric, bucket_start_gmt8`;
 }
 
 function buildTotalCountSql(minutes: number) {
@@ -177,4 +212,32 @@ export async function fetchTotalRequestCount(minutes: number) {
   }
 
   return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+
+export async function fetchDashboardMetrics(tab: RouteTab) {
+  const response = await executeStatement(buildDashboardSql(tab));
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  let live15mCount = 0;
+  const points: DashboardPoint[] = [];
+  for (const row of response.result?.data_array ?? []) {
+    const metric = parseString(row[0]);
+    const bucket = parseString(row[1]);
+    const value = parseNumber(row[2]) ?? 0;
+    if (metric === "live_15m") {
+      live15mCount = value;
+    } else if (metric === "rolling" && bucket) {
+      points.push({ bucket_start_gmt8: bucket, total_count: value });
+    }
+  }
+
+  const average = points.length > 0 ? points.reduce((sum, point) => sum + point.total_count, 0) / points.length : 0;
+  return {
+    average_rolling_6h_total: average,
+    live_15m_count: live15mCount,
+    rolling_6h_points: points,
+  };
 }
