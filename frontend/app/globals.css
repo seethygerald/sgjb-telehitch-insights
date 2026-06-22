@@ -104,10 +104,6 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
   0%, 100% { opacity: .72; transform: scale(.94); box-shadow: 0 0 0 0 rgba(15, 86, 179, .5), 0 8px 22px rgba(15, 86, 179, .32); }
   50% { opacity: 1; transform: scale(1.08); box-shadow: 0 0 0 10px rgba(15, 86, 179, 0), 0 10px 26px rgba(15, 86, 179, .4); }
 }
-@keyframes telehitch-route-blink {
-  0%, 100% { opacity: .35; stroke-opacity: .25; }
-  50% { opacity: 1; stroke-opacity: .95; }
-}
 @keyframes telehitch-route-flow {
   from { stroke-dashoffset: 0; background-position: 0 0; }
   to { stroke-dashoffset: -14; background-position: 12px 0; }
