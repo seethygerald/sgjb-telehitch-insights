@@ -1,4 +1,5 @@
 export type RouteTab = "within-sg" | "sg-jb";
+export type RequestType = "hitcher_request" | "driver_request";
 
 export type TelehitchRequest = {
   gold_request_id: string;
@@ -30,12 +31,39 @@ export type TelehitchRequest = {
   message: string | null;
 };
 
+export type DashboardPoint = {
+  bucket_start_gmt8: string;
+  total_count: number;
+};
+
+export type DailyDashboardPoint = {
+  day_start_gmt8: string;
+  total_count: number;
+};
+
+export type DashboardMetric = {
+  request_type: RequestType;
+  window_hours: number;
+  average_rolling_total: number;
+  current_rolling_total: number;
+  live_15m_count: number;
+  daily_points: DailyDashboardPoint[];
+  rolling_points: DashboardPoint[];
+};
+
+export type DashboardResponse = {
+  generated_at: string;
+  tab: RouteTab;
+  metrics: Record<RequestType, Record<number, DashboardMetric>>;
+};
+
 export type RequestsResponse = {
   generated_at: string;
   minutes: number;
   tab: RouteTab;
   count: number;
   total_count: number;
+  active_driver_count: number;
   requests: TelehitchRequest[];
 };
 
