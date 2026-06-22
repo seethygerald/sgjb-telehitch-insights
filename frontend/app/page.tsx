@@ -16,15 +16,27 @@ function formatChartTime(date: Date) {
   return date.toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "numeric", hour12: true }).replace(/\s/g, "").toLowerCase();
 }
 
-function formatChartDay(date: Date) {
-  return date.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" });
+function formatChartDate(date: Date) {
+  return date.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", day: "numeric", month: "short" });
+}
+
+function formatChartTooltipDateTime(date: Date) {
+  const dateLabel = date.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", day: "numeric", month: "long" });
+  return `${dateLabel} ${formatChartTime(date)}`;
 }
 
 function shouldShowRollingAxisLabel(index: number, points: DashboardMetric["rolling_points"]) {
-  if (index === 0 || index === points.length - 1 || index % 10 === 0) return true;
+  if (index === 0) return true;
   const current = parseSingaporeDate(points[index].bucket_start_gmt8);
   const previous = parseSingaporeDate(points[index - 1]?.bucket_start_gmt8 ?? points[index].bucket_start_gmt8);
-  return current.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" }) !== previous.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
+  const currentDate = current.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
+  const previousDate = previous.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
+  if (currentDate !== previousDate) return true;
+  if (index === points.length - 1) {
+    const first = parseSingaporeDate(points[0].bucket_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
+    return currentDate !== first;
+  }
+  return false;
 }
 
 type AppSection = "tracker" | "dashboard";
@@ -92,14 +104,11 @@ function RequestMetricCard({ metric, title, description, selectedWindow, onWindo
               <div className="mini-chart" aria-label={`${title} rolling request count chart`}>
                 {displayedPoints.map((point, index) => {
                   const windowEnd = parseSingaporeDate(point.bucket_start_gmt8);
-                  const windowStart = new Date(windowEnd.getTime() - selectedWindow * 60 * 60 * 1000);
-                  const startLabel = formatChartTime(windowStart);
-                  const endLabel = formatChartTime(windowEnd);
-                  const dayChanged = windowEnd.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" }) !== windowStart.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
-                  const axisLabel = dayChanged ? formatChartDay(windowEnd) : startLabel;
+                  const tooltipLabel = `${formatChartTooltipDateTime(windowEnd)}: ${point.total_count.toLocaleString()} requests`;
+                  const axisLabel = formatChartDate(windowEnd);
                   const showAxisLabel = shouldShowRollingAxisLabel(index, displayedPoints);
                   return (
-                    <div key={point.bucket_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={`${point.total_count} requests from ${startLabel} to ${endLabel}`}>
+                    <div key={point.bucket_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={tooltipLabel}>
                       <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} />
                       {showAxisLabel ? <span>{axisLabel}</span> : null}
                     </div>
@@ -274,7 +283,7 @@ export default function Home() {
               <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
             </div>
             <aside className="feed-panel">
-              <div className="panel-heading compact"><div><h2>{selectedNode ? `${selectedNode.requests.length} ${selectedNode.kind === "pickup" ? "pick-up" : "drop-off"} request${selectedNode.requests.length === 1 ? "" : "s"}` : "Recent feed"}</h2><p>{selectedNode ? "Click the map background to return to the feed" : "Last 40 posts"}</p><p className="feed-note">Note: Ambiguous locations will default to the nearest MRT station</p></div></div>
+              <div className="panel-heading compact"><div><h2>{selectedNode ? `${selectedNode.requests.length} ${selectedNode.kind === "pickup" ? "pick-up" : "drop-off"} request${selectedNode.requests.length === 1 ? "" : "s"}` : "Recent feed"}</h2>{selectedNode ? <p>Click the map background to return to the feed</p> : null}<p className="feed-note">Note: Ambiguous locations will default to the nearest MRT station</p></div></div>
               <RequestFeed requests={requests} selectedNode={selectedNode} />
             </aside>
           </section>

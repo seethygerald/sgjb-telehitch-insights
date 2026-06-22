@@ -4,7 +4,7 @@ import { NodeDetails, RequestNode, formatSingaporeTime } from "../lib/mapNodes";
 import { TelehitchRequest } from "../lib/types";
 
 export default function RequestFeed({ requests, selectedNode }: { requests: TelehitchRequest[]; selectedNode: RequestNode | null }) {
-  const visibleRequests = selectedNode?.requests ?? requests.slice(0, 40);
+  const visibleRequests = selectedNode?.requests ?? requests;
   return (
     <div className="feed-list">
       {visibleRequests.map((request) => (
