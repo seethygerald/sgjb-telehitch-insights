@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { RequestNode, formatSingaporeTime } from "../lib/mapNodes";
+import { KeyboardEvent, useState } from "react";
+import { RequestNode, formatSingaporeTime, parseSingaporeDate } from "../lib/mapNodes";
 import { TelehitchRequest } from "../lib/types";
 
 function formatRequestType(value: string | null) {
@@ -10,7 +10,16 @@ function formatRequestType(value: string | null) {
 }
 
 function pickupTimeLabel(request: TelehitchRequest) {
-  return request.request_time_text?.trim() || "now";
+  const raw = request.request_time_text?.trim();
+  if (!raw || /^now$/i.test(raw)) return "Now";
+
+  const pickupTime = parseSingaporeDate(raw).getTime();
+  const requestTime = parseSingaporeDate(request.message_date_gmt8).getTime();
+  if (Number.isFinite(pickupTime) && Number.isFinite(requestTime) && Math.abs(pickupTime - requestTime) < 60 * 1000) {
+    return "Now";
+  }
+
+  return raw;
 }
 
 function locationLine(request: TelehitchRequest) {
@@ -21,30 +30,44 @@ function paxLabel(request: TelehitchRequest) {
   return request.pax_count ? `${request.pax_count} pax` : "Pax not parsed";
 }
 
+function hasResolvedAddress(request: TelehitchRequest) {
+  return Boolean(request.pickup_formatted_address || request.dropoff_formatted_address);
+}
+
 function RequestCard({ request, expanded, onToggle }: { request: TelehitchRequest; expanded: boolean; onToggle: () => void }) {
-  const pickupAddress = request.pickup_formatted_address || request.pickup_location || "Unknown pickup";
-  const dropoffAddress = request.dropoff_formatted_address || request.dropoff_location || "Unknown dropoff";
-  const pickupPostal = request.pickup_postal_code;
-  const dropoffPostal = request.dropoff_postal_code;
+  const pickupAddress = request.pickup_formatted_address;
+  const dropoffAddress = request.dropoff_formatted_address;
+  const expandable = hasResolvedAddress(request);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!expandable) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onToggle();
+    }
+  }
 
   return (
-    <article className={`feed-card${expanded ? " expanded" : ""}`}>
-      <button className="feed-card-button" type="button" onClick={onToggle} aria-expanded={expanded}>
-        <div className="feed-card-topline">
-          <span>{formatRequestType(request.request_type)}</span>
-          <time>{formatSingaporeTime(request.message_date_gmt8, false)}</time>
+    <article
+      className={`feed-card${expanded ? " expanded" : ""}${expandable ? " clickable" : ""}`}
+      onClick={expandable ? onToggle : undefined}
+      onKeyDown={handleKeyDown}
+      role={expandable ? "button" : undefined}
+      tabIndex={expandable ? 0 : undefined}
+      aria-expanded={expandable ? expanded : undefined}
+    >
+      <div className="feed-card-topline">
+        <span>{formatRequestType(request.request_type)}</span>
+        <time>{formatSingaporeTime(request.message_date_gmt8, false)}</time>
+      </div>
+      <h3>{locationLine(request)}</h3>
+      {expanded ? (
+        <div className="feed-card-details">
+          {pickupAddress ? <p><strong>Pick-up:</strong> {pickupAddress}</p> : null}
+          {dropoffAddress ? <p><strong>Drop-off:</strong> {dropoffAddress}</p> : null}
         </div>
-        <h3>{locationLine(request)}</h3>
-        {expanded ? (
-          <div className="feed-card-details">
-            <p>{pickupAddress}</p>
-            {pickupPostal ? <p>{pickupPostal}</p> : null}
-            <p>{dropoffAddress}</p>
-            {dropoffPostal ? <p>{dropoffPostal}</p> : null}
-          </div>
-        ) : null}
-        <p>{paxLabel(request)} · {request.channel || "Unknown channel"} · {pickupTimeLabel(request)}</p>
-      </button>
+      ) : null}
+      <p>{paxLabel(request)} · {request.channel || "Unknown channel"} · {pickupTimeLabel(request)}</p>
     </article>
   );
 }
@@ -64,14 +87,10 @@ export default function RequestFeed({ requests, selectedNode }: { requests: Tele
 
   return (
     <div className="feed-list">
-      {visibleRequests.map((request) => (
-        <RequestCard
-          key={`${selectedNode?.id ?? "feed"}-${request.gold_request_id}`}
-          request={request}
-          expanded={expandedIds.has(`${selectedNode?.id ?? "feed"}-${request.gold_request_id}`)}
-          onToggle={() => toggleRequest(`${selectedNode?.id ?? "feed"}-${request.gold_request_id}`)}
-        />
-      ))}
+      {visibleRequests.map((request) => {
+        const requestKey = `${selectedNode?.id ?? "feed"}-${request.gold_request_id}`;
+        return <RequestCard key={requestKey} request={request} expanded={expandedIds.has(requestKey)} onToggle={() => toggleRequest(requestKey)} />;
+      })}
     </div>
   );
 }

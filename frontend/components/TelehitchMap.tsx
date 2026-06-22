@@ -78,32 +78,20 @@ function nodeIcon(node: RequestNode) {
 
 function RouteMotion() {
   useEffect(() => {
-    const attachAnimation = () => {
+    let offset = 20;
+    const tick = () => {
+      offset = offset <= 0 ? 20 : offset - 2;
+      const opacity = 0.25 + ((Math.sin(Date.now() / 180) + 1) / 2) * 0.7;
       document.querySelectorAll<SVGPathElement>("path.telehitch-route").forEach((path) => {
-        if (path.querySelector("animate[data-telehitch-route-flow]")) return;
-
-        const flow = document.createElementNS("http://www.w3.org/2000/svg", "animate");
-        flow.setAttribute("data-telehitch-route-flow", "true");
-        flow.setAttribute("attributeName", "stroke-dashoffset");
-        flow.setAttribute("values", "20;0");
-        flow.setAttribute("dur", "0.7s");
-        flow.setAttribute("repeatCount", "indefinite");
-
-        const blink = document.createElementNS("http://www.w3.org/2000/svg", "animate");
-        blink.setAttribute("data-telehitch-route-flow", "true");
-        blink.setAttribute("attributeName", "stroke-opacity");
-        blink.setAttribute("values", "0.25;0.95;0.25");
-        blink.setAttribute("dur", "1.35s");
-        blink.setAttribute("repeatCount", "indefinite");
-
-        path.append(flow, blink);
+        path.setAttribute("stroke-dashoffset", offset.toString());
+        path.setAttribute("stroke-opacity", opacity.toFixed(2));
       });
     };
 
-    attachAnimation();
-    const animationFrame = window.requestAnimationFrame(attachAnimation);
-    return () => window.cancelAnimationFrame(animationFrame);
-  });
+    tick();
+    const interval = window.setInterval(tick, 80);
+    return () => window.clearInterval(interval);
+  }, []);
 
   return null;
 }
