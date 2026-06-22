@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { fetchLatestRequestTime, fetchRecentRequests, fetchTotalRequestCount, fetchUniqueRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
 
-const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
+const MAINTENANCE_MESSAGE = "The app is currently undergoing maintenance. Please try again in several hours.";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
