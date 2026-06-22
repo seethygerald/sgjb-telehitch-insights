@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchRecentRequests, fetchTotalRequestCount } from "../../../../lib/databricks";
+import { fetchLatestRequestTime, fetchRecentRequests, fetchTotalRequestCount, fetchUniqueRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
+
+const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,9 +24,11 @@ export async function GET(request: NextRequest) {
   const tab = parseTab(params.get("tab"));
 
   try {
-    const [requests, totalCount] = await Promise.all([
+    const [requests, totalCount, activeDriverCount, latestPostAt] = await Promise.all([
       fetchRecentRequests(minutes, tab, limit),
       fetchTotalRequestCount(minutes),
+      fetchUniqueRequestCount(60, "driver_request"),
+      fetchLatestRequestTime(minutes, "hitcher_request"),
     ]);
     return NextResponse.json({
       generated_at: new Date().toISOString(),
@@ -32,10 +36,12 @@ export async function GET(request: NextRequest) {
       tab,
       count: requests.length,
       total_count: totalCount,
+      active_driver_count: activeDriverCount,
+      latest_post_at: latestPostAt,
       requests,
-    });
+    }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("Recent requests Databricks request failed", error);
+    return NextResponse.json({ error: MAINTENANCE_MESSAGE }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
   }
 }
