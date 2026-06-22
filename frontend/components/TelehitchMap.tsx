@@ -121,7 +121,7 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
           <Polyline
             key={`route-${request.gold_request_id}`}
             positions={[[request.pickup_latitude, request.pickup_longitude], [request.dropoff_latitude, request.dropoff_longitude]]}
-            pathOptions={{ color: recencyColor(recency), weight: 3, dashArray: "2 12", dashOffset: "0", lineCap: "round", className: "telehitch-route" }}
+            pathOptions={{ color: recencyColor(recency), weight: 3, dashArray: "2 12", lineCap: "round", className: "telehitch-route" }}
           />
         );
       })}
