@@ -75,6 +75,27 @@ function nodeIcon(node: RequestNode) {
   });
 }
 
+
+function RouteMotion() {
+  useEffect(() => {
+    let offset = 20;
+    const tick = () => {
+      offset = offset <= 0 ? 20 : offset - 2;
+      const opacity = 0.25 + ((Math.sin(Date.now() / 180) + 1) / 2) * 0.7;
+      document.querySelectorAll<SVGPathElement>("path.telehitch-route").forEach((path) => {
+        path.setAttribute("stroke-dashoffset", offset.toString());
+        path.setAttribute("stroke-opacity", opacity.toFixed(2));
+      });
+    };
+
+    tick();
+    const interval = window.setInterval(tick, 80);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return null;
+}
+
 function MapBackgroundClick({ onClearSelection }: { onClearSelection: () => void }) {
   useMapEvents({
     click: (event: LeafletMouseEvent) => {
@@ -91,6 +112,7 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
 
   return (
     <MapContainer center={[1.3521, 103.8198]} zoom={11} minZoom={11} maxZoom={19} className="map-canvas" scrollWheelZoom>
+      <RouteMotion />
       <MapBackgroundClick onClearSelection={onClearSelection} />
       <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} detectRetina maxZoom={19} minZoom={11} />
       {requests.map((request) => {
