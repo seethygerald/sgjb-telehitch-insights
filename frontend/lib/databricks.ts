@@ -1,4 +1,4 @@
-import { DatabricksStatementResponse, RouteTab, TelehitchRequest } from "./types";
+import { DashboardMetric, DatabricksStatementResponse, RequestType, RouteTab, TelehitchRequest } from "./types";
 
 const SELECT_COLUMNS = [
   "gold_request_id", "silver_request_id", "channel", "topic_id", "message_id", "message_date_gmt8", "scraped_at_gmt8",
@@ -61,11 +61,76 @@ ORDER BY message_date_gmt8 DESC
 LIMIT ${limit}`;
 }
 
-function buildTotalCountSql(minutes: number) {
-  return `SELECT count(*) AS total_count
+
+function buildDashboardSql() {
+  return `WITH window_options AS (
+  SELECT explode(array(1, 2, 3, 6)) AS window_hours
+), request_types AS (
+  SELECT explode(array('hitcher_request', 'driver_request')) AS request_type
+), buckets AS (
+  SELECT explode(sequence(
+    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 24 hours),
+    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore')),
+    interval 15 minutes
+  )) AS bucket_start
+), base AS (
+  SELECT gold_request_id, request_type, message_date_gmt8
+  FROM ${tableName()}
+  WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 30 hours
+    AND request_type IN ('hitcher_request', 'driver_request')
+), rolling AS (
+  SELECT
+    rt.request_type,
+    wo.window_hours,
+    b.bucket_start,
+    count(DISTINCT base.gold_request_id) AS total_count
+  FROM request_types rt
+  CROSS JOIN window_options wo
+  CROSS JOIN buckets b
+  LEFT JOIN base
+    ON base.request_type = rt.request_type
+   AND base.message_date_gmt8 > b.bucket_start - make_interval(0, 0, 0, 0, wo.window_hours, 0, 0)
+   AND base.message_date_gmt8 <= b.bucket_start
+  GROUP BY rt.request_type, wo.window_hours, b.bucket_start
+), live AS (
+  SELECT
+    rt.request_type,
+    count(DISTINCT base.gold_request_id) AS total_count
+  FROM request_types rt
+  LEFT JOIN base
+    ON base.request_type = rt.request_type
+   AND base.message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 15 minutes
+  GROUP BY rt.request_type
+), daily AS (
+  SELECT
+    rt.request_type,
+    count(DISTINCT base.gold_request_id) AS total_count
+  FROM request_types rt
+  LEFT JOIN base
+    ON base.request_type = rt.request_type
+   AND base.message_date_gmt8 >= date_trunc('DAY', from_utc_timestamp(current_timestamp(), 'Asia/Singapore'))
+  GROUP BY rt.request_type
+)
+SELECT 'rolling' AS metric, request_type, window_hours, CAST(bucket_start AS STRING) AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
+FROM rolling
+UNION ALL
+SELECT 'live_15m' AS metric, request_type, NULL AS window_hours, NULL AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
+FROM live
+UNION ALL
+SELECT 'daily_total' AS metric, request_type, NULL AS window_hours, NULL AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
+FROM daily
+ORDER BY metric, request_type, window_hours, bucket_start_gmt8`;
+}
+
+function buildUniqueRequestCountSql(minutes: number, requestType: RequestType) {
+  return `SELECT count(DISTINCT gold_request_id) AS total_count
 FROM ${tableName()}
-WHERE scraped_at_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
-  AND request_type = 'hitcher_request'`;
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+  AND request_type = '${requestType}'`;
+}
+
+function buildTotalCountSql(minutes: number) {
+  return buildUniqueRequestCountSql(minutes, "hitcher_request");
 }
 
 async function executeStatement(statement: string): Promise<DatabricksStatementResponse> {
@@ -172,6 +237,75 @@ export async function fetchRecentRequests(minutes: number, tab: RouteTab, limit:
 export async function fetchTotalRequestCount(minutes: number) {
   const statement = buildTotalCountSql(minutes);
   const response = await executeStatement(statement);
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+
+export async function fetchDashboardMetrics() {
+  const response = await executeStatement(buildDashboardSql());
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  const metrics: Record<RequestType, Record<number, DashboardMetric>> = {
+    hitcher_request: {},
+    driver_request: {},
+  };
+
+  for (const requestType of ["hitcher_request", "driver_request"] as const) {
+    for (const windowHours of [1, 2, 3, 6]) {
+      metrics[requestType][windowHours] = {
+        request_type: requestType,
+        window_hours: windowHours,
+        average_rolling_total: 0,
+        current_rolling_total: 0,
+        live_15m_count: 0,
+        daily_total_count: 0,
+        rolling_points: [],
+      };
+    }
+  }
+
+  const liveCounts: Record<RequestType, number> = { hitcher_request: 0, driver_request: 0 };
+  const dailyCounts: Record<RequestType, number> = { hitcher_request: 0, driver_request: 0 };
+  for (const row of response.result?.data_array ?? []) {
+    const metric = parseString(row[0]);
+    const requestType = parseString(row[1]) as RequestType | null;
+    const windowHours = parseNumber(row[2]);
+    const bucket = parseString(row[3]);
+    const value = parseNumber(row[4]) ?? 0;
+    if (requestType !== "hitcher_request" && requestType !== "driver_request") continue;
+
+    if (metric === "live_15m") {
+      liveCounts[requestType] = value;
+    } else if (metric === "daily_total") {
+      dailyCounts[requestType] = value;
+    } else if (metric === "rolling" && bucket && windowHours && metrics[requestType][windowHours]) {
+      metrics[requestType][windowHours].rolling_points.push({ bucket_start_gmt8: bucket, total_count: value });
+    }
+  }
+
+  for (const requestType of ["hitcher_request", "driver_request"] as const) {
+    for (const metric of Object.values(metrics[requestType])) {
+      metric.live_15m_count = liveCounts[requestType];
+      metric.daily_total_count = dailyCounts[requestType];
+      metric.current_rolling_total = metric.rolling_points.at(-1)?.total_count ?? 0;
+      metric.average_rolling_total = metric.rolling_points.length > 0
+        ? metric.rolling_points.reduce((sum, point) => sum + point.total_count, 0) / metric.rolling_points.length
+        : 0;
+    }
+  }
+
+  return { metrics };
+}
+
+
+export async function fetchUniqueRequestCount(minutes: number, requestType: RequestType) {
+  const response = await executeStatement(buildUniqueRequestCountSql(minutes, requestType));
   if (response.status.state !== "SUCCEEDED") {
     throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
   }
