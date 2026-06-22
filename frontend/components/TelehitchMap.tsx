@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { divIcon } from "leaflet";
+import { divIcon, DomEvent, LeafletMouseEvent } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { TelehitchRequest } from "../lib/types";
@@ -62,7 +62,13 @@ function nodeIcon(node: RequestNode) {
 }
 
 function MapBackgroundClick({ onClearSelection }: { onClearSelection: () => void }) {
-  useMapEvents({ click: onClearSelection });
+  useMapEvents({
+    click: (event: LeafletMouseEvent) => {
+      const target = event.originalEvent.target;
+      if (target instanceof HTMLElement && target.closest(".telehitch-node-wrapper, .leaflet-interactive")) return;
+      onClearSelection();
+    },
+  });
   return null;
 }
 
@@ -77,7 +83,7 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
         <Polyline
           key={`route-${request.gold_request_id}`}
           positions={[[request.pickup_latitude, request.pickup_longitude], [request.dropoff_latitude, request.dropoff_longitude]]}
-          pathOptions={{ color: "#0f56b3", weight: 3, opacity: 0.7, dashArray: "2 12", lineCap: "round", className: "telehitch-route" }}
+          pathOptions={{ color: "#0f56b3", weight: 3, dashArray: "10 14", lineCap: "round", className: "telehitch-route" }}
         />
       ))}
       {nodes.map((node) => (
@@ -85,7 +91,7 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
           key={node.id}
           position={node.position}
           icon={nodeIcon(node)}
-          eventHandlers={{ click: (event) => { event.originalEvent.stopPropagation(); onSelectNode(node); } }}
+          eventHandlers={{ click: (event) => { DomEvent.stop(event); onSelectNode(node); } }}
         >
           <Tooltip direction="top" offset={[0, -8]} opacity={1} sticky>
             {node.requests.length > 1 ? <strong>{node.requests.length} requests (click for more info)</strong> : <NodeDetails request={node.requests[0]} kind={node.kind} />}
