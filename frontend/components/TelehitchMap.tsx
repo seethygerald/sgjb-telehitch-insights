@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { divIcon, DomEvent, LeafletMouseEvent } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -75,6 +75,39 @@ function nodeIcon(node: RequestNode) {
   });
 }
 
+
+function RouteMotion() {
+  useEffect(() => {
+    const attachAnimation = () => {
+      document.querySelectorAll<SVGPathElement>("path.telehitch-route").forEach((path) => {
+        if (path.querySelector("animate[data-telehitch-route-flow]")) return;
+
+        const flow = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+        flow.setAttribute("data-telehitch-route-flow", "true");
+        flow.setAttribute("attributeName", "stroke-dashoffset");
+        flow.setAttribute("values", "20;0");
+        flow.setAttribute("dur", "0.7s");
+        flow.setAttribute("repeatCount", "indefinite");
+
+        const blink = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+        blink.setAttribute("data-telehitch-route-flow", "true");
+        blink.setAttribute("attributeName", "stroke-opacity");
+        blink.setAttribute("values", "0.25;0.95;0.25");
+        blink.setAttribute("dur", "1.35s");
+        blink.setAttribute("repeatCount", "indefinite");
+
+        path.append(flow, blink);
+      });
+    };
+
+    attachAnimation();
+    const animationFrame = window.requestAnimationFrame(attachAnimation);
+    return () => window.cancelAnimationFrame(animationFrame);
+  });
+
+  return null;
+}
+
 function MapBackgroundClick({ onClearSelection }: { onClearSelection: () => void }) {
   useMapEvents({
     click: (event: LeafletMouseEvent) => {
@@ -91,6 +124,7 @@ export default function TelehitchMap({ requests, onSelectNode, onClearSelection 
 
   return (
     <MapContainer center={[1.3521, 103.8198]} zoom={11} minZoom={11} maxZoom={19} className="map-canvas" scrollWheelZoom>
+      <RouteMotion />
       <MapBackgroundClick onClearSelection={onClearSelection} />
       <TileLayer attribution={TILE_ATTRIBUTION} url={TILE_URL} detectRetina maxZoom={19} minZoom={11} />
       {requests.map((request) => {

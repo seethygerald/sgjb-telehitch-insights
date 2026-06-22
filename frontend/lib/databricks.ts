@@ -101,7 +101,7 @@ function buildDashboardSql() {
 ), live AS (
   SELECT
     rt.request_type,
-    count(DISTINCT base.gold_request_id) AS total_count
+    count(base.request_type) AS total_count
   FROM request_types rt
   LEFT JOIN base
     ON base.request_type = rt.request_type

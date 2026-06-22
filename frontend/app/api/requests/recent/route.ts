@@ -21,7 +21,7 @@ function parseTab(value: string | null): RouteTab {
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const minutes = parsePositiveInteger(params.get("minutes"), 360, 720);
-  const limit = parsePositiveInteger(params.get("limit"), 500, 1000);
+  const limit = parsePositiveInteger(params.get("limit"), 5000, 5000);
   const tab = parseTab(params.get("tab"));
 
   try {

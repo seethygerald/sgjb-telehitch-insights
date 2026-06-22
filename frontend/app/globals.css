@@ -38,9 +38,13 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .map-loading { display: grid; place-items: center; color: var(--muted); }
 .feed-panel { max-height: 745px; }
 .feed-list { height: 680px; overflow: auto; padding: 12px; display: grid; gap: 10px; align-content: start; }
-.feed-card { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: #fff; }
-.feed-card-topline { display: flex; justify-content: space-between; gap: 8px; color: var(--blue); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-.feed-card h3 { margin: 8px 0; font-size: 15px; line-height: 1.35; letter-spacing: -.02em; }
+.feed-card { border: 1px solid var(--line); border-radius: 18px; background: #fff; overflow: hidden; }
+.feed-card-button { appearance: none; background: transparent; border: 0; color: inherit; cursor: pointer; display: grid; gap: 8px; padding: 14px; text-align: left; width: 100%; }
+.feed-card-button:focus-visible { outline: 3px solid #bfdbfe; outline-offset: -3px; }
+.feed-card.expanded { border-color: #a9c9ff; box-shadow: inset 0 0 0 1px #c7dbff; }
+.feed-card-details { display: grid; gap: 3px; }
+.feed-card-topline { display: flex; justify-content: space-between; gap: 8px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.feed-card h3 { margin: 0; font-size: 15px; line-height: 1.35; letter-spacing: -.02em; }
 .feed-card p { margin: 0; font-size: 13px; }
 .popup-card { display: grid; gap: 4px; max-width: 260px; }
 .popup-card span { color: #475467; }

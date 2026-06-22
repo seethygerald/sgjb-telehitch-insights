@@ -228,7 +228,7 @@ export default function Home() {
     let cancelled = false;
     async function load() {
       try {
-        const response = await fetch(`/api/requests/recent?tab=${activeTab}&minutes=360&limit=500&t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-store" } });
+        const response = await fetch(`/api/requests/recent?tab=${activeTab}&minutes=360&limit=5000&t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-store" } });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || MAINTENANCE_MESSAGE);
         if (!cancelled) {
