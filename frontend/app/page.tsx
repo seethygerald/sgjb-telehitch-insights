@@ -10,6 +10,23 @@ import { DashboardMetric, DashboardResponse, RequestsResponse, RouteTab, Telehit
 const TelehitchMap = dynamic(() => import("../components/TelehitchMap"), { ssr: false, loading: () => <div className="map-loading">Loading map…</div> });
 const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
 
+const ROLLING_BAR_COUNT = 50;
+
+function formatChartTime(date: Date) {
+  return date.toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "numeric", hour12: true }).replace(/\s/g, "").toLowerCase();
+}
+
+function formatChartDay(date: Date) {
+  return date.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" });
+}
+
+function shouldShowRollingAxisLabel(index: number, points: DashboardMetric["rolling_points"]) {
+  if (index === 0 || index === points.length - 1 || index % 10 === 0) return true;
+  const current = parseSingaporeDate(points[index].bucket_start_gmt8);
+  const previous = parseSingaporeDate(points[index - 1]?.bucket_start_gmt8 ?? points[index].bucket_start_gmt8);
+  return current.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" }) !== previous.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
+}
+
 type AppSection = "tracker" | "dashboard";
 
 const ROUTE_TABS: Array<{ id: RouteTab; label: string; description: string; disabled?: boolean }> = [
@@ -51,7 +68,7 @@ function RequestMetricCard({ metric, title, description, selectedWindow, onWindo
     const points = metric?.rolling_points ?? [];
     if (points.length === 0) return [];
     const firstRemainder = (points.length - 1) % bucketStep;
-    return points.filter((_, index) => index % bucketStep === firstRemainder);
+    return points.filter((_, index) => index % bucketStep === firstRemainder).slice(-ROLLING_BAR_COUNT);
   }, [bucketStep, metric]);
   const maxRolling = Math.max(...displayedPoints.map((point) => point.total_count), 1);
 
@@ -73,16 +90,18 @@ function RequestMetricCard({ metric, title, description, selectedWindow, onWindo
             <div className="chart-with-axis">
               <ChartYAxis max={maxRolling} />
               <div className="mini-chart" aria-label={`${title} rolling request count chart`}>
-                {displayedPoints.map((point) => {
+                {displayedPoints.map((point, index) => {
                   const windowEnd = parseSingaporeDate(point.bucket_start_gmt8);
                   const windowStart = new Date(windowEnd.getTime() - selectedWindow * 60 * 60 * 1000);
-                  const startLabel = windowStart.toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
-                  const endLabel = windowEnd.toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
-                  const axisLabel = selectedWindow === 1 ? endLabel : `${startLabel}–${endLabel}`;
+                  const startLabel = formatChartTime(windowStart);
+                  const endLabel = formatChartTime(windowEnd);
+                  const dayChanged = windowEnd.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" }) !== windowStart.toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" });
+                  const axisLabel = dayChanged ? formatChartDay(windowEnd) : startLabel;
+                  const showAxisLabel = shouldShowRollingAxisLabel(index, displayedPoints);
                   return (
                     <div key={point.bucket_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={`${point.total_count} requests from ${startLabel} to ${endLabel}`}>
                       <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} />
-                      <span>{axisLabel}</span>
+                      {showAxisLabel ? <span>{axisLabel}</span> : null}
                     </div>
                   );
                 })}
@@ -189,6 +208,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<RouteTab>("within-sg");
   const [requests, setRequests] = useState<TelehitchRequest[]>([]);
   const [status, setStatus] = useState("Loading recent requests…");
+  const [trackerStats, setTrackerStats] = useState<{ mappable: number; total: number } | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [latestPostAt, setLatestPostAt] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<RequestNode | null>(null);
@@ -205,13 +225,14 @@ export default function Home() {
         if (!cancelled) {
           const payload = data as RequestsResponse;
           setRequests(payload.requests);
-          setStatus(`${payload.count} mappable requests out of ${payload.total_count} requests over the last 6 hours`);
+          setStatus("");
+          setTrackerStats({ mappable: payload.count, total: payload.total_count });
           setActiveDriverCount(payload.active_driver_count);
           setLatestPostAt(payload.latest_post_at);
           setUpdatedAt(new Date(payload.generated_at));
         }
       } catch {
-        if (!cancelled) { setStatus(MAINTENANCE_MESSAGE); setRequests([]); setSelectedNode(null); setActiveDriverCount(null); setLatestPostAt(null); }
+        if (!cancelled) { setStatus(MAINTENANCE_MESSAGE); setTrackerStats(null); setRequests([]); setSelectedNode(null); setActiveDriverCount(null); setLatestPostAt(null); }
       }
     }
     load();
@@ -236,7 +257,7 @@ export default function Home() {
           <div>
             <p className="eyebrow">{section === "tracker" ? "TeleHitch Tracker" : "Dashboard"}</p>
             <h1>{section === "tracker" ? "Live ride request map" : "Request volume dashboard"}</h1>
-            <p className="hero-copy">{section === "tracker" ? "Minimal six-hour view of pickup and dropoff demand. Darker blinking dots are more recent; larger dots indicate overlapping pickup or dropoff points." : "Within-SG request volume summarized across rolling six-hour windows and the live last-15-minute count."}</p>
+            <p className="hero-copy">{section === "tracker" ? "Minimal six-hour view of pickup and dropoff demand. Darker blinking dots are more recent; larger dots indicate overlapping pickup or dropoff points." : "6-hourly rolling average, last 15-minute and daily total volume metrics for hitcher and driver requests"}</p>
           </div>
           {section === "tracker" ? <div className="stat-card"><span>Latest post</span><strong>{newest ? parseSingaporeDate(newest).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" }) : "—"}</strong><small>{updatedAt ? `Refreshed ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Auto-refreshes every 15s"}</small></div> : null}
         </header>
@@ -248,7 +269,7 @@ export default function Home() {
           <section className="dashboard-grid">
             <div className="map-panel">
               <div className="panel-heading">
-                <div className="map-heading-copy"><div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div><p>{status}</p><p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p></div>
+                <div className="map-heading-copy"><div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div>{trackerStats ? <p><strong>{trackerStats.mappable.toLocaleString()}</strong> mappable requests out of <strong>{trackerStats.total.toLocaleString()}</strong> requests over the last 6 hours</p> : <p>{status}</p>}<p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : <><strong>{activeDriverCount.toLocaleString()}</strong> drivers actively searching over the past hour</>}</p></div>
               </div>
               <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
             </div>

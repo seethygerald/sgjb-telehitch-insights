@@ -69,7 +69,7 @@ function buildDashboardSql() {
   SELECT explode(array('hitcher_request', 'driver_request')) AS request_type
 ), buckets AS (
   SELECT explode(sequence(
-    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 24 hours),
+    date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 300 hours),
     date_trunc('MINUTE', from_utc_timestamp(current_timestamp(), 'Asia/Singapore')),
     interval 15 minutes
   )) AS bucket_start
