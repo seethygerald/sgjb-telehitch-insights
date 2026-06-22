@@ -36,13 +36,18 @@ export type DashboardPoint = {
   total_count: number;
 };
 
+export type DailyDashboardPoint = {
+  day_start_gmt8: string;
+  total_count: number;
+};
+
 export type DashboardMetric = {
   request_type: RequestType;
   window_hours: number;
   average_rolling_total: number;
   current_rolling_total: number;
   live_15m_count: number;
-  daily_total_count: number;
+  daily_points: DailyDashboardPoint[];
   rolling_points: DashboardPoint[];
 };
 

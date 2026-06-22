@@ -84,11 +84,37 @@ function LiveMetricCard({ metric, title, description }: { metric?: DashboardMetr
 }
 
 function DailyMetricCard({ metric, title, description }: { metric?: DashboardMetric; title: string; description: string }) {
+  const points = metric?.daily_points ?? [];
+  const maxDaily = Math.max(...points.map((point) => point.total_count), 1);
+  const chartWidth = 320;
+  const chartHeight = 150;
+  const pointGap = points.length > 1 ? chartWidth / (points.length - 1) : chartWidth;
+  const linePoints = points.map((point, index) => {
+    const x = index * pointGap;
+    const y = chartHeight - (point.total_count / maxDaily) * chartHeight;
+    return `${x},${y}`;
+  }).join(" ");
+
   return (
-    <article className="metric-panel live">
+    <article className="metric-panel">
       <div className="panel-heading compact"><div><h2>{title}</h2><p>{description}</p></div></div>
-      <div className="metric-body live-count">
-        {metric ? <><strong>{metric.daily_total_count.toLocaleString()}</strong><span>Requests made today</span></> : <p className="loading-copy">Loading dashboard…</p>}
+      <div className="metric-body">
+        {metric ? (
+          <>
+            <strong>{(points.at(-1)?.total_count ?? 0).toLocaleString()}</strong>
+            <span>Requests made today</span>
+            <svg className="daily-line-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${title} daily request line chart`} preserveAspectRatio="none">
+              <polyline points={linePoints} fill="none" />
+              {points.map((point, index) => {
+                const x = index * pointGap;
+                const y = chartHeight - (point.total_count / maxDaily) * chartHeight;
+                const dayLabel = parseSingaporeDate(point.day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" });
+                return <circle key={point.day_start_gmt8} cx={x} cy={y} r="4"><title>{`${point.total_count} requests on ${dayLabel}`}</title></circle>;
+              })}
+            </svg>
+            <div className="daily-axis"><span>{points[0] ? parseSingaporeDate(points[0].day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" }) : ""}</span><span>{points.at(-1) ? parseSingaporeDate(points.at(-1)!.day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" }) : ""}</span></div>
+          </>
+        ) : <p className="loading-copy">Loading dashboard…</p>}
       </div>
     </article>
   );
@@ -130,10 +156,10 @@ function DashboardView({ activeTab }: { activeTab: RouteTab }) {
   return (
     <section className="dashboard-metrics">
       <RequestMetricCard metric={hitcherMetric} title="Hitcher rolling requests" description="Hitcher requests over time" selectedWindow={hitcherWindow} onWindowChange={setHitcherWindow} />
-      <LiveMetricCard metric={hitcherLiveMetric} title="Hitcher live requests" description="Hitcher requests" />
-      <DailyMetricCard metric={hitcherLiveMetric} title="Hitcher daily requests" description="Hitcher requests" />
       <RequestMetricCard metric={driverMetric} title="Driver rolling requests" description="Driver requests over time" selectedWindow={driverWindow} onWindowChange={setDriverWindow} />
+      <LiveMetricCard metric={hitcherLiveMetric} title="Hitcher live requests" description="Hitcher requests" />
       <LiveMetricCard metric={driverLiveMetric} title="Driver live requests" description="Driver requests" />
+      <DailyMetricCard metric={hitcherLiveMetric} title="Hitcher daily requests" description="Hitcher requests" />
       <DailyMetricCard metric={driverLiveMetric} title="Driver daily requests" description="Driver requests" />
     </section>
   );
@@ -197,8 +223,7 @@ export default function Home() {
 
         {section === "tracker" ? (
           <div className="tracker-legend-block">
-            <div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span><span className="route-sample" /> Blinking dotted route</div>
-            <p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p>
+            <div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div>
           </div>
         ) : null}
 
@@ -208,7 +233,7 @@ export default function Home() {
           <section className="dashboard-grid">
             <div className="map-panel">
               <div className="panel-heading">
-                <div className="map-heading-copy"><h2>{ROUTE_TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p></div>
+                <div className="map-heading-copy"><h2>{ROUTE_TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p><p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p></div>
               </div>
               <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
             </div>

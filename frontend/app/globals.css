@@ -161,3 +161,11 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .map-panel .leaflet-tile-container img { outline: 1px solid transparent; }
 .tracker-legend-block { display: grid; gap: 6px; margin: -12px 0 16px; }
 .tracker-legend-block .legend { justify-content: flex-start; white-space: normal; }
+.daily-line-chart { height: 170px; overflow: visible; width: 100%; }
+.daily-line-chart polyline { stroke: var(--blue); stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.daily-line-chart circle { cursor: pointer; fill: #fff; stroke: var(--blue); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.daily-axis { color: var(--muted); display: flex; font-size: 11px; justify-content: space-between; margin-top: -6px; }
+.map-canvas, .map-loading { height: 560px; }
+.feed-list { height: 560px; }
+.feed-panel { max-height: 625px; }
+@media (max-width: 640px) { .map-canvas, .map-loading, .feed-list { height: 440px; } }
