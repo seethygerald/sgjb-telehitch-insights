@@ -30,6 +30,19 @@ export type TelehitchRequest = {
   message: string | null;
 };
 
+export type DashboardPoint = {
+  bucket_start_gmt8: string;
+  total_count: number;
+};
+
+export type DashboardResponse = {
+  generated_at: string;
+  tab: RouteTab;
+  average_rolling_6h_total: number;
+  live_15m_count: number;
+  rolling_6h_points: DashboardPoint[];
+};
+
 export type RequestsResponse = {
   generated_at: string;
   minutes: number;
