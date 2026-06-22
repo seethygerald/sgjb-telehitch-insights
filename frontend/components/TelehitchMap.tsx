@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { divIcon, DomEvent, LeafletMouseEvent } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -78,9 +78,13 @@ function nodeIcon(node: RequestNode) {
 
 function RouteMotion() {
   useEffect(() => {
-    let offset = 20;
+    const dashCycleLength = 14;
+    let offset = dashCycleLength;
     const tick = () => {
-      offset = offset <= 0 ? 20 : offset - 2;
+      // Leaflet renders each route in the same order as the Polyline positions
+      // below: pickup first, drop-off second. Decreasing the dash offset moves
+      // the dotted stroke forward along that SVG path.
+      offset = offset <= 0 ? dashCycleLength : offset - 1;
       const opacity = 0.25 + ((Math.sin(Date.now() / 180) + 1) / 2) * 0.7;
       document.querySelectorAll<SVGPathElement>("path.telehitch-route").forEach((path) => {
         path.setAttribute("stroke-dashoffset", offset.toString());
