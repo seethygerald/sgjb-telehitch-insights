@@ -6,6 +6,7 @@ const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Ple
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function parsePositiveInteger(value: string | null, fallback: number, max: number) {
   const parsed = Number(value);
@@ -20,7 +21,7 @@ function parseTab(value: string | null): RouteTab {
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const minutes = parsePositiveInteger(params.get("minutes"), 360, 720);
-  const limit = parsePositiveInteger(params.get("limit"), 500, 1000);
+  const limit = parsePositiveInteger(params.get("limit"), 5000, 5000);
   const tab = parseTab(params.get("tab"));
 
   try {
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
       fetchRecentRequests(minutes, tab, limit),
       fetchTotalRequestCount(minutes),
       fetchUniqueRequestCount(60, "driver_request"),
-      fetchLatestRequestTime(minutes, "hitcher_request"),
+      fetchLatestRequestTime(minutes),
     ]);
     return NextResponse.json({
       generated_at: new Date().toISOString(),
