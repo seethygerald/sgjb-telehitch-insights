@@ -47,7 +47,12 @@ function ChartYAxis({ max }: { max: number }) {
 
 function RequestMetricCard({ metric, title, description, selectedWindow, onWindowChange }: { metric?: DashboardMetric; title: string; description: string; selectedWindow: number; onWindowChange: (windowHours: number) => void }) {
   const bucketStep = selectedWindow * 4;
-  const displayedPoints = metric?.rolling_points.filter((_, index) => index % bucketStep === 0 || index === metric.rolling_points.length - 1) ?? [];
+  const displayedPoints = useMemo(() => {
+    const points = metric?.rolling_points ?? [];
+    if (points.length === 0) return [];
+    const firstRemainder = (points.length - 1) % bucketStep;
+    return points.filter((_, index) => index % bucketStep === firstRemainder);
+  }, [bucketStep, metric]);
   const maxRolling = Math.max(...displayedPoints.map((point) => point.total_count), 1);
 
   return (
@@ -69,11 +74,15 @@ function RequestMetricCard({ metric, title, description, selectedWindow, onWindo
               <ChartYAxis max={maxRolling} />
               <div className="mini-chart" aria-label={`${title} rolling request count chart`}>
                 {displayedPoints.map((point) => {
-                  const timeLabel = parseSingaporeDate(point.bucket_start_gmt8).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
+                  const windowEnd = parseSingaporeDate(point.bucket_start_gmt8);
+                  const windowStart = new Date(windowEnd.getTime() - selectedWindow * 60 * 60 * 1000);
+                  const startLabel = windowStart.toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
+                  const endLabel = windowEnd.toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
+                  const axisLabel = selectedWindow === 1 ? endLabel : `${startLabel}–${endLabel}`;
                   return (
-                    <div key={point.bucket_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={`${point.total_count} requests at ${timeLabel}`}>
+                    <div key={point.bucket_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={`${point.total_count} requests from ${startLabel} to ${endLabel}`}>
                       <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} />
-                      <span>{timeLabel}</span>
+                      <span>{axisLabel}</span>
                     </div>
                   );
                 })}
