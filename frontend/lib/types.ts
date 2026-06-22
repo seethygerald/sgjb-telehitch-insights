@@ -40,7 +40,9 @@ export type DashboardMetric = {
   request_type: RequestType;
   window_hours: number;
   average_rolling_total: number;
+  current_rolling_total: number;
   live_15m_count: number;
+  daily_total_count: number;
   rolling_points: DashboardPoint[];
 };
 

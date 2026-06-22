@@ -153,3 +153,11 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .full-width { grid-column: 1 / -1; }
 .side-tab .side-tab-label { align-items: center; display: flex; font-size: 14px; font-weight: 600; gap: 10px; line-height: 20px; margin-bottom: 0; }
 .side-tab .side-tab-icon { align-items: center; display: inline-flex; font-size: 16px; font-weight: 500; height: 16px; justify-content: center; line-height: 1; margin-bottom: 0; width: 16px; }
+.mini-chart { align-items: stretch; padding-bottom: 28px; position: relative; }
+.mini-bar-slot { align-items: flex-end; display: flex; flex: 1; height: 100%; min-width: 4px; position: relative; }
+.mini-bar-slot .mini-bar { width: 100%; }
+.mini-bar-slot span { bottom: -22px; color: var(--muted); font-size: 10px; left: 50%; position: absolute; transform: translateX(-50%) rotate(-35deg); transform-origin: top center; white-space: nowrap; }
+.map-panel .leaflet-container { background: var(--panel); }
+.map-panel .leaflet-tile-container img { outline: 1px solid transparent; }
+.tracker-legend-block { display: grid; gap: 6px; margin: -12px 0 16px; }
+.tracker-legend-block .legend { justify-content: flex-start; white-space: normal; }

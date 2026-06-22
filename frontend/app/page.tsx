@@ -51,12 +51,19 @@ function RequestMetricCard({ metric, title, description, selectedWindow, onWindo
         </div>
         {metric ? (
           <>
-            <strong>{Math.round(metric.average_rolling_total).toLocaleString()}</strong>
-            <span>Average unique requests in a rolling {selectedWindow}-hour window</span>
+            <strong>{Math.round(metric.current_rolling_total).toLocaleString()}</strong>
+            <span>Unique requests in the current rolling {selectedWindow}-hour window</span>
             <div className="mini-chart" aria-label={`${title} rolling request count chart`}>
-              {metric.rolling_points.map((point) => (
-                <div key={point.bucket_start_gmt8} className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} title={`${point.total_count} requests at ${parseSingaporeDate(point.bucket_start_gmt8).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" })}`} />
-              ))}
+              {metric.rolling_points.map((point, index) => {
+                const timeLabel = parseSingaporeDate(point.bucket_start_gmt8).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
+                const showTick = index % 12 === 0 || index === metric.rolling_points.length - 1;
+                return (
+                  <div key={point.bucket_start_gmt8} className="mini-bar-slot" title={`${point.total_count} requests at ${timeLabel}`}>
+                    <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} />
+                    {showTick ? <span>{timeLabel}</span> : null}
+                  </div>
+                );
+              })}
             </div>
           </>
         ) : <p className="loading-copy">Loading dashboard…</p>}
@@ -70,7 +77,18 @@ function LiveMetricCard({ metric, title, description }: { metric?: DashboardMetr
     <article className="metric-panel live">
       <div className="panel-heading compact"><div><h2>{title}</h2><p>{description}</p></div></div>
       <div className="metric-body live-count">
-        {metric ? <><strong>{metric.live_15m_count.toLocaleString()}</strong><span>Unique requests made in the last 15 minutes</span></> : <p className="loading-copy">Loading dashboard…</p>}
+        {metric ? <><strong>{metric.live_15m_count.toLocaleString()}</strong><span>Requests made in the last 15 minutes</span></> : <p className="loading-copy">Loading dashboard…</p>}
+      </div>
+    </article>
+  );
+}
+
+function DailyMetricCard({ metric, title, description }: { metric?: DashboardMetric; title: string; description: string }) {
+  return (
+    <article className="metric-panel live">
+      <div className="panel-heading compact"><div><h2>{title}</h2><p>{description}</p></div></div>
+      <div className="metric-body live-count">
+        {metric ? <><strong>{metric.daily_total_count.toLocaleString()}</strong><span>Requests made today</span></> : <p className="loading-copy">Loading dashboard…</p>}
       </div>
     </article>
   );
@@ -111,10 +129,12 @@ function DashboardView({ activeTab }: { activeTab: RouteTab }) {
 
   return (
     <section className="dashboard-metrics">
-      <RequestMetricCard metric={hitcherMetric} title="Hitcher rolling requests" description="Total unique hitcher_requests over time" selectedWindow={hitcherWindow} onWindowChange={setHitcherWindow} />
-      <LiveMetricCard metric={hitcherLiveMetric} title="Hitcher live requests" description="Total unique hitcher_requests" />
-      <RequestMetricCard metric={driverMetric} title="Driver rolling requests" description="Total unique driver_requests over time" selectedWindow={driverWindow} onWindowChange={setDriverWindow} />
-      <LiveMetricCard metric={driverLiveMetric} title="Driver live requests" description="Total unique driver_requests" />
+      <RequestMetricCard metric={hitcherMetric} title="Hitcher rolling requests" description="Hitcher requests over time" selectedWindow={hitcherWindow} onWindowChange={setHitcherWindow} />
+      <LiveMetricCard metric={hitcherLiveMetric} title="Hitcher live requests" description="Hitcher requests" />
+      <DailyMetricCard metric={hitcherLiveMetric} title="Hitcher daily requests" description="Hitcher requests" />
+      <RequestMetricCard metric={driverMetric} title="Driver rolling requests" description="Driver requests over time" selectedWindow={driverWindow} onWindowChange={setDriverWindow} />
+      <LiveMetricCard metric={driverLiveMetric} title="Driver live requests" description="Driver requests" />
+      <DailyMetricCard metric={driverLiveMetric} title="Driver daily requests" description="Driver requests" />
     </section>
   );
 }
@@ -175,13 +195,20 @@ export default function Home() {
           {section === "tracker" ? <div className="stat-card"><span>Latest post</span><strong>{newest ? parseSingaporeDate(newest).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" }) : "—"}</strong><small>{updatedAt ? `Refreshed ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Auto-refreshes every 15s"}</small></div> : null}
         </header>
 
+        {section === "tracker" ? (
+          <div className="tracker-legend-block">
+            <div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span><span className="route-sample" /> Blinking dotted route</div>
+            <p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p>
+          </div>
+        ) : null}
+
         <RouteTabs activeTab={activeTab} onChange={setActiveTab} />
 
         {section === "tracker" ? (
           <section className="dashboard-grid">
             <div className="map-panel">
               <div className="panel-heading">
-                <div className="map-heading-copy"><h2>{ROUTE_TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p><div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span><span className="route-sample" /> Blinking dotted route</div><p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p></div>
+                <div className="map-heading-copy"><h2>{ROUTE_TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p></div>
               </div>
               <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
             </div>

@@ -101,12 +101,24 @@ function buildDashboardSql() {
     ON base.request_type = rt.request_type
    AND base.message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval 15 minutes
   GROUP BY rt.request_type
+), daily AS (
+  SELECT
+    rt.request_type,
+    count(DISTINCT base.gold_request_id) AS total_count
+  FROM request_types rt
+  LEFT JOIN base
+    ON base.request_type = rt.request_type
+   AND base.message_date_gmt8 >= date_trunc('DAY', from_utc_timestamp(current_timestamp(), 'Asia/Singapore'))
+  GROUP BY rt.request_type
 )
 SELECT 'rolling' AS metric, request_type, window_hours, CAST(bucket_start AS STRING) AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
 FROM rolling
 UNION ALL
 SELECT 'live_15m' AS metric, request_type, NULL AS window_hours, NULL AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
 FROM live
+UNION ALL
+SELECT 'daily_total' AS metric, request_type, NULL AS window_hours, NULL AS bucket_start_gmt8, CAST(total_count AS DOUBLE) AS metric_value
+FROM daily
 ORDER BY metric, request_type, window_hours, bucket_start_gmt8`;
 }
 
@@ -250,13 +262,16 @@ export async function fetchDashboardMetrics() {
         request_type: requestType,
         window_hours: windowHours,
         average_rolling_total: 0,
+        current_rolling_total: 0,
         live_15m_count: 0,
+        daily_total_count: 0,
         rolling_points: [],
       };
     }
   }
 
   const liveCounts: Record<RequestType, number> = { hitcher_request: 0, driver_request: 0 };
+  const dailyCounts: Record<RequestType, number> = { hitcher_request: 0, driver_request: 0 };
   for (const row of response.result?.data_array ?? []) {
     const metric = parseString(row[0]);
     const requestType = parseString(row[1]) as RequestType | null;
@@ -267,6 +282,8 @@ export async function fetchDashboardMetrics() {
 
     if (metric === "live_15m") {
       liveCounts[requestType] = value;
+    } else if (metric === "daily_total") {
+      dailyCounts[requestType] = value;
     } else if (metric === "rolling" && bucket && windowHours && metrics[requestType][windowHours]) {
       metrics[requestType][windowHours].rolling_points.push({ bucket_start_gmt8: bucket, total_count: value });
     }
@@ -275,6 +292,8 @@ export async function fetchDashboardMetrics() {
   for (const requestType of ["hitcher_request", "driver_request"] as const) {
     for (const metric of Object.values(metrics[requestType])) {
       metric.live_15m_count = liveCounts[requestType];
+      metric.daily_total_count = dailyCounts[requestType];
+      metric.current_rolling_total = metric.rolling_points.at(-1)?.total_count ?? 0;
       metric.average_rolling_total = metric.rolling_points.length > 0
         ? metric.rolling_points.reduce((sum, point) => sum + point.total_count, 0) / metric.rolling_points.length
         : 0;
