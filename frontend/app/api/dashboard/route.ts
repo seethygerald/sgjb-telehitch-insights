@@ -5,7 +5,7 @@ import { RouteTab } from "../../../lib/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
+const MAINTENANCE_MESSAGE = "The app is currently undergoing maintenance. Please try again in several hours.";
 
 function parseTab(value: string | null): RouteTab {
   return value === "sg-jb" ? "sg-jb" : "within-sg";

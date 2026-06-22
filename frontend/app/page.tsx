@@ -8,7 +8,7 @@ import type { RequestNode } from "../lib/mapNodes";
 import { DashboardMetric, DashboardResponse, RequestsResponse, RouteTab, TelehitchRequest } from "../lib/types";
 
 const TelehitchMap = dynamic(() => import("../components/TelehitchMap"), { ssr: false, loading: () => <div className="map-loading">Loading map…</div> });
-const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
+const MAINTENANCE_MESSAGE = "The app is currently undergoing maintenance. Please try again in several hours.";
 
 const ROLLING_BAR_COUNT = 50;
 
@@ -278,7 +278,7 @@ export default function Home() {
           <section className="dashboard-grid">
             <div className="map-panel">
               <div className="panel-heading">
-                <div className="map-heading-copy"><div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div>{trackerStats ? <p><strong>{trackerStats.mappable.toLocaleString()}</strong> mappable requests out of <strong>{trackerStats.total.toLocaleString()}</strong> requests over the last 6 hours</p> : <p>{status}</p>}<p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : <><strong>{activeDriverCount.toLocaleString()}</strong> drivers actively searching over the past hour</>}</p></div>
+                <div className="map-heading-copy"><div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div>{trackerStats ? <p><strong>{trackerStats.mappable.toLocaleString()}</strong> mappable requests out of <strong>{trackerStats.total.toLocaleString()}</strong> requests over the last 6 hours</p> : <p>{status}</p>}{trackerStats ? <p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : <><strong>{activeDriverCount.toLocaleString()}</strong> drivers actively searching over the past hour</>}</p> : null}</div>
               </div>
               <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
             </div>
