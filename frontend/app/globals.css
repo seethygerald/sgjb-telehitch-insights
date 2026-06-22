@@ -140,3 +140,16 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
   .app-layout { width: min(100% - 20px, 1440px); padding: 20px 0; }
   .side-nav { grid-template-columns: 1fr; }
 }
+.side-tab { display: grid; gap: 3px; padding: 10px 12px; }
+.side-tab-label { align-items: center; display: flex; font-size: 14px; font-weight: 600; gap: 10px; line-height: 20px; }
+.side-tab-icon { align-items: center; display: inline-flex; font-size: 16px; height: 16px; justify-content: center; line-height: 1; width: 16px; }
+.side-tab small { font-size: 12px; line-height: 16px; padding-left: 26px; }
+.map-heading-copy { display: grid; gap: 6px; }
+.map-heading-copy .legend { margin-top: 4px; }
+.active-drivers { color: var(--muted); font-size: 13px; margin: 0; }
+.window-switcher { display: inline-flex; gap: 8px; margin-bottom: 4px; }
+.window-option { cursor: pointer; border: 1px solid var(--line); background: #fff; border-radius: 999px; color: var(--muted); font-size: 13px; font-weight: 700; padding: 6px 12px; }
+.window-option.active { background: var(--blue-soft); border-color: #a9c9ff; color: var(--blue); }
+.full-width { grid-column: 1 / -1; }
+.side-tab .side-tab-label { align-items: center; display: flex; font-size: 14px; font-weight: 600; gap: 10px; line-height: 20px; margin-bottom: 0; }
+.side-tab .side-tab-icon { align-items: center; display: inline-flex; font-size: 16px; font-weight: 500; height: 16px; justify-content: center; line-height: 1; margin-bottom: 0; width: 16px; }

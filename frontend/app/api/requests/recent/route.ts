@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchRecentRequests, fetchTotalRequestCount } from "../../../../lib/databricks";
+import { fetchRecentRequests, fetchTotalRequestCount, fetchUniqueRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
 
 const MAINTENANCE_MESSAGE = "The app is currently going through maintenance. Please try again in several hours.";
@@ -24,9 +24,10 @@ export async function GET(request: NextRequest) {
   const tab = parseTab(params.get("tab"));
 
   try {
-    const [requests, totalCount] = await Promise.all([
+    const [requests, totalCount, activeDriverCount] = await Promise.all([
       fetchRecentRequests(minutes, tab, limit),
       fetchTotalRequestCount(minutes),
+      fetchUniqueRequestCount(60, "driver_request"),
     ]);
     return NextResponse.json({
       generated_at: new Date().toISOString(),
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
       tab,
       count: requests.length,
       total_count: totalCount,
+      active_driver_count: activeDriverCount,
       requests,
     });
   } catch (error) {

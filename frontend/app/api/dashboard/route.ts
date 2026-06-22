@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const tab = parseTab(request.nextUrl.searchParams.get("tab"));
 
   try {
-    const metrics = await fetchDashboardMetrics(tab);
+    const metrics = await fetchDashboardMetrics();
     return NextResponse.json({
       generated_at: new Date().toISOString(),
       tab,
