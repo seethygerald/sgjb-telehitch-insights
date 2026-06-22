@@ -64,6 +64,7 @@ export type RequestsResponse = {
   count: number;
   total_count: number;
   active_driver_count: number;
+  latest_post_at: string | null;
   requests: TelehitchRequest[];
 };
 

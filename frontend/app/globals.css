@@ -169,3 +169,12 @@ h1 { margin: 0; font-size: clamp(36px, 6vw, 72px); line-height: .92; letter-spac
 .feed-list { height: 560px; }
 .feed-panel { max-height: 625px; }
 @media (max-width: 640px) { .map-canvas, .map-loading, .feed-list { height: 440px; } }
+.chart-with-axis { display: grid; gap: 8px; grid-template-columns: 42px minmax(0, 1fr); }
+.chart-y-axis { color: var(--muted); display: flex; flex-direction: column; font-size: 11px; justify-content: space-between; padding: 0 0 28px; text-align: right; }
+.daily-bar-chart .mini-bar { background: linear-gradient(180deg, #2563eb, #bfdbfe); }
+.tooltip-target { position: relative; }
+.tooltip-target::after { background: #172033; border-radius: 8px; bottom: calc(100% + 8px); color: #fff; content: attr(data-tooltip); font-size: 12px; left: 50%; opacity: 0; padding: 6px 8px; pointer-events: none; position: absolute; transform: translate(-50%, 4px); transition: opacity .12s ease .5s, transform .12s ease .5s; white-space: nowrap; z-index: 500; }
+.tooltip-target:hover::after { opacity: 1; transform: translate(-50%, 0); }
+.feed-note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.map-heading-copy .legend { margin: 0 0 2px; }
+.tracker-legend-block { display: none; }

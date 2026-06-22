@@ -138,6 +138,13 @@ WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapo
   AND request_type = '${requestType}'`;
 }
 
+function buildLatestRequestTimeSql(minutes: number, requestType: RequestType) {
+  return `SELECT CAST(max(message_date_gmt8) AS STRING) AS latest_post_at
+FROM ${tableName()}
+WHERE message_date_gmt8 >= from_utc_timestamp(current_timestamp(), 'Asia/Singapore') - interval ${minutes} minutes
+  AND request_type = '${requestType}'`;
+}
+
 function buildTotalCountSql(minutes: number) {
   return buildUniqueRequestCountSql(minutes, "hitcher_request");
 }
@@ -320,4 +327,14 @@ export async function fetchUniqueRequestCount(minutes: number, requestType: Requ
   }
 
   return parseNumber(response.result?.data_array?.[0]?.[0]) ?? 0;
+}
+
+
+export async function fetchLatestRequestTime(minutes: number, requestType: RequestType) {
+  const response = await executeStatement(buildLatestRequestTimeSql(minutes, requestType));
+  if (response.status.state !== "SUCCEEDED") {
+    throw new Error(response.status.error?.message ?? `Databricks statement ended with ${response.status.state}`);
+  }
+
+  return parseString(response.result?.data_array?.[0]?.[0]);
 }

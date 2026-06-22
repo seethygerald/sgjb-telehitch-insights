@@ -35,8 +35,20 @@ function RouteTabs({ activeTab, onChange }: { activeTab: RouteTab; onChange: (ta
   );
 }
 
+function ChartYAxis({ max }: { max: number }) {
+  return (
+    <div className="chart-y-axis" aria-hidden="true">
+      <span>{Math.round(max).toLocaleString()}</span>
+      <span>{Math.round(max / 2).toLocaleString()}</span>
+      <span>0</span>
+    </div>
+  );
+}
+
 function RequestMetricCard({ metric, title, description, selectedWindow, onWindowChange }: { metric?: DashboardMetric; title: string; description: string; selectedWindow: number; onWindowChange: (windowHours: number) => void }) {
-  const maxRolling = Math.max(...(metric?.rolling_points.map((point) => point.total_count) ?? [1]), 1);
+  const bucketStep = selectedWindow * 4;
+  const displayedPoints = metric?.rolling_points.filter((_, index) => index % bucketStep === 0 || index === metric.rolling_points.length - 1) ?? [];
+  const maxRolling = Math.max(...displayedPoints.map((point) => point.total_count), 1);
 
   return (
     <article className="metric-panel">
@@ -53,17 +65,19 @@ function RequestMetricCard({ metric, title, description, selectedWindow, onWindo
           <>
             <strong>{Math.round(metric.current_rolling_total).toLocaleString()}</strong>
             <span>Unique requests in the current rolling {selectedWindow}-hour window</span>
-            <div className="mini-chart" aria-label={`${title} rolling request count chart`}>
-              {metric.rolling_points.map((point, index) => {
-                const timeLabel = parseSingaporeDate(point.bucket_start_gmt8).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
-                const showTick = index % 12 === 0 || index === metric.rolling_points.length - 1;
-                return (
-                  <div key={point.bucket_start_gmt8} className="mini-bar-slot" title={`${point.total_count} requests at ${timeLabel}`}>
-                    <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} />
-                    {showTick ? <span>{timeLabel}</span> : null}
-                  </div>
-                );
-              })}
+            <div className="chart-with-axis">
+              <ChartYAxis max={maxRolling} />
+              <div className="mini-chart" aria-label={`${title} rolling request count chart`}>
+                {displayedPoints.map((point) => {
+                  const timeLabel = parseSingaporeDate(point.bucket_start_gmt8).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" });
+                  return (
+                    <div key={point.bucket_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={`${point.total_count} requests at ${timeLabel}`}>
+                      <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxRolling) * 100)}%` }} />
+                      <span>{timeLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </>
         ) : <p className="loading-copy">Loading dashboard…</p>}
@@ -86,14 +100,6 @@ function LiveMetricCard({ metric, title, description }: { metric?: DashboardMetr
 function DailyMetricCard({ metric, title, description }: { metric?: DashboardMetric; title: string; description: string }) {
   const points = metric?.daily_points ?? [];
   const maxDaily = Math.max(...points.map((point) => point.total_count), 1);
-  const chartWidth = 320;
-  const chartHeight = 150;
-  const pointGap = points.length > 1 ? chartWidth / (points.length - 1) : chartWidth;
-  const linePoints = points.map((point, index) => {
-    const x = index * pointGap;
-    const y = chartHeight - (point.total_count / maxDaily) * chartHeight;
-    return `${x},${y}`;
-  }).join(" ");
 
   return (
     <article className="metric-panel">
@@ -103,16 +109,20 @@ function DailyMetricCard({ metric, title, description }: { metric?: DashboardMet
           <>
             <strong>{(points.at(-1)?.total_count ?? 0).toLocaleString()}</strong>
             <span>Requests made today</span>
-            <svg className="daily-line-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${title} daily request line chart`} preserveAspectRatio="none">
-              <polyline points={linePoints} fill="none" />
-              {points.map((point, index) => {
-                const x = index * pointGap;
-                const y = chartHeight - (point.total_count / maxDaily) * chartHeight;
-                const dayLabel = parseSingaporeDate(point.day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" });
-                return <circle key={point.day_start_gmt8} cx={x} cy={y} r="4"><title>{`${point.total_count} requests on ${dayLabel}`}</title></circle>;
-              })}
-            </svg>
-            <div className="daily-axis"><span>{points[0] ? parseSingaporeDate(points[0].day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" }) : ""}</span><span>{points.at(-1) ? parseSingaporeDate(points.at(-1)!.day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" }) : ""}</span></div>
+            <div className="chart-with-axis">
+              <ChartYAxis max={maxDaily} />
+              <div className="mini-chart daily-bar-chart" aria-label={`${title} daily request bar chart`}>
+                {points.map((point) => {
+                  const dayLabel = parseSingaporeDate(point.day_start_gmt8).toLocaleDateString("en-SG", { timeZone: "Asia/Singapore", month: "short", day: "numeric" });
+                  return (
+                    <div key={point.day_start_gmt8} className="mini-bar-slot tooltip-target" data-tooltip={`${point.total_count} requests on ${dayLabel}`}>
+                      <div className="mini-bar" style={{ height: `${Math.max(8, (point.total_count / maxDaily) * 100)}%` }} />
+                      <span>{dayLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </>
         ) : <p className="loading-copy">Loading dashboard…</p>}
       </div>
@@ -130,7 +140,7 @@ function DashboardView({ activeTab }: { activeTab: RouteTab }) {
     let cancelled = false;
     async function load() {
       try {
-        const response = await fetch(`/api/dashboard?tab=${activeTab}`, { cache: "no-store" });
+        const response = await fetch(`/api/dashboard?tab=${activeTab}&t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-store" } });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || MAINTENANCE_MESSAGE);
         if (!cancelled) { setData(payload as DashboardResponse); setError(null); }
@@ -171,6 +181,7 @@ export default function Home() {
   const [requests, setRequests] = useState<TelehitchRequest[]>([]);
   const [status, setStatus] = useState("Loading recent requests…");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [latestPostAt, setLatestPostAt] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<RequestNode | null>(null);
   const [activeDriverCount, setActiveDriverCount] = useState<number | null>(null);
 
@@ -179,19 +190,19 @@ export default function Home() {
     let cancelled = false;
     async function load() {
       try {
-        const response = await fetch(`/api/requests/recent?tab=${activeTab}&minutes=360&limit=500`, { cache: "no-store" });
+        const response = await fetch(`/api/requests/recent?tab=${activeTab}&minutes=360&limit=500&t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-store" } });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || MAINTENANCE_MESSAGE);
         if (!cancelled) {
           const payload = data as RequestsResponse;
           setRequests(payload.requests);
-          setSelectedNode(null);
           setStatus(`${payload.count} mappable requests out of ${payload.total_count} requests over the last 6 hours`);
           setActiveDriverCount(payload.active_driver_count);
+          setLatestPostAt(payload.latest_post_at);
           setUpdatedAt(new Date(payload.generated_at));
         }
       } catch {
-        if (!cancelled) { setStatus(MAINTENANCE_MESSAGE); setRequests([]); setSelectedNode(null); setActiveDriverCount(null); }
+        if (!cancelled) { setStatus(MAINTENANCE_MESSAGE); setRequests([]); setSelectedNode(null); setActiveDriverCount(null); setLatestPostAt(null); }
       }
     }
     load();
@@ -199,7 +210,7 @@ export default function Home() {
     return () => { cancelled = true; window.clearInterval(interval); };
   }, [activeTab, section]);
 
-  const newest = useMemo(() => requests[0]?.message_date_gmt8, [requests]);
+  const newest = useMemo(() => latestPostAt ?? requests[0]?.message_date_gmt8, [latestPostAt, requests]);
 
   return (
     <main className="app-layout">
@@ -221,11 +232,6 @@ export default function Home() {
           {section === "tracker" ? <div className="stat-card"><span>Latest post</span><strong>{newest ? parseSingaporeDate(newest).toLocaleTimeString("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit" }) : "—"}</strong><small>{updatedAt ? `Refreshed ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Auto-refreshes every 15s"}</small></div> : null}
         </header>
 
-        {section === "tracker" ? (
-          <div className="tracker-legend-block">
-            <div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div>
-          </div>
-        ) : null}
 
         <RouteTabs activeTab={activeTab} onChange={setActiveTab} />
 
@@ -233,12 +239,12 @@ export default function Home() {
           <section className="dashboard-grid">
             <div className="map-panel">
               <div className="panel-heading">
-                <div className="map-heading-copy"><h2>{ROUTE_TABS.find((tab) => tab.id === activeTab)?.label}</h2><p>{status}</p><p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p></div>
+                <div className="map-heading-copy"><div className="legend"><span className="recency-gradient" /> <span>Darker = more recent; lightest ≈ 6 hours ago</span></div><p>{status}</p><p className="active-drivers">{activeDriverCount === null ? "Loading active drivers…" : `${activeDriverCount.toLocaleString()} drivers actively searching over the past hour`}</p></div>
               </div>
               <TelehitchMap requests={requests} onSelectNode={setSelectedNode} onClearSelection={() => setSelectedNode(null)} />
             </div>
             <aside className="feed-panel">
-              <div className="panel-heading compact"><div><h2>{selectedNode ? `${selectedNode.requests.length} ${selectedNode.kind === "pickup" ? "pick-up" : "drop-off"} request${selectedNode.requests.length === 1 ? "" : "s"}` : "Recent feed"}</h2><p>{selectedNode ? "Click the map background to return to the feed" : "Last 40 posts"}</p></div></div>
+              <div className="panel-heading compact"><div><h2>{selectedNode ? `${selectedNode.requests.length} ${selectedNode.kind === "pickup" ? "pick-up" : "drop-off"} request${selectedNode.requests.length === 1 ? "" : "s"}` : "Recent feed"}</h2><p>{selectedNode ? "Click the map background to return to the feed" : "Last 40 posts"}</p><p className="feed-note">Note: Ambiguous locations will default to the nearest MRT station</p></div></div>
               <RequestFeed requests={requests} selectedNode={selectedNode} />
             </aside>
           </section>

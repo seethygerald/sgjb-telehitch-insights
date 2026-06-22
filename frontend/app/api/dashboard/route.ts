@@ -20,9 +20,9 @@ export async function GET(request: NextRequest) {
       generated_at: new Date().toISOString(),
       tab,
       ...metrics,
-    });
+    }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
     console.error("Dashboard Databricks request failed", error);
-    return NextResponse.json({ error: MAINTENANCE_MESSAGE }, { status: 503 });
+    return NextResponse.json({ error: MAINTENANCE_MESSAGE }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
   }
 }
