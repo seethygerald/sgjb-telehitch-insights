@@ -7,7 +7,7 @@ A Vercel-ready Next.js app that visualizes `workspace.gold.gold_telehitch_reques
 Browser requests never talk to Databricks directly. The app uses this flow:
 
 1. Next.js client polls `/api/requests/recent?tab=within-sg&minutes=360` every 15 seconds.
-2. The Vercel API route runs on the server and calls the Databricks SQL Statement Execution API.
+2. The Vercel API route first checks the daily service window and only calls the Databricks SQL Statement Execution API from 09:00 through 20:59 Singapore time.
 3. Databricks returns recent rows from `workspace.gold.gold_telehitch_requests` with complete pickup/dropoff coordinates, plus a total request count for the same time window.
 4. The browser renders pickup/dropoff dots and route lines on a Leaflet map.
 
@@ -32,6 +32,9 @@ Set these as encrypted Vercel project environment variables:
 - `DATABRICKS_CATALOG` — defaults to `workspace`.
 - `DATABRICKS_SCHEMA` — defaults to `gold`.
 - `DATABRICKS_TABLE` — defaults to `gold_telehitch_requests`.
+- `SERVICE_WINDOW_TIME_ZONE` — defaults to `Asia/Singapore`.
+- `SERVICE_WINDOW_START_HOUR` — defaults to `9`.
+- `SERVICE_WINDOW_END_HOUR` — defaults to `21`; the API refuses Databricks calls from 21:00 until 08:59.
 
 Map tiles:
 

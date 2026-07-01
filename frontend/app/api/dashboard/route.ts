@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isWithinServiceWindow, serviceWindowMessage } from "../../../lib/availability";
 import { fetchDashboardMetrics } from "../../../lib/databricks";
 import { RouteTab } from "../../../lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const MAINTENANCE_MESSAGE = "The app is currently undergoing maintenance. Please try again in several hours.";
 
 function parseTab(value: string | null): RouteTab {
   return value === "sg-jb" ? "sg-jb" : "within-sg";
@@ -13,6 +12,10 @@ function parseTab(value: string | null): RouteTab {
 
 export async function GET(request: NextRequest) {
   const tab = parseTab(request.nextUrl.searchParams.get("tab"));
+
+  if (!isWithinServiceWindow()) {
+    return NextResponse.json({ error: serviceWindowMessage() }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
+  }
 
   try {
     const metrics = await fetchDashboardMetrics();
@@ -23,6 +26,6 @@ export async function GET(request: NextRequest) {
     }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
     console.error("Dashboard Databricks request failed", error);
-    return NextResponse.json({ error: MAINTENANCE_MESSAGE }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
+    return NextResponse.json({ error: serviceWindowMessage() }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
   }
 }
