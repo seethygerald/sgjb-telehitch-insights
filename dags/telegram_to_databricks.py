@@ -6,8 +6,10 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowSkipException
 from airflow.models import Variable
 
 from telegram_scraper import (
@@ -32,6 +34,33 @@ SECRET_VARIABLES = {
 def _int_env(name: str, default: int) -> int:
     value = os.getenv(name)
     return int(value) if value else default
+
+
+SERVICE_WINDOW_TIME_ZONE = os.getenv("SERVICE_WINDOW_TIME_ZONE", "Asia/Singapore")
+SERVICE_WINDOW_START_HOUR = _int_env("SERVICE_WINDOW_START_HOUR", 9)
+SERVICE_WINDOW_END_HOUR = _int_env("SERVICE_WINDOW_END_HOUR", 21)
+
+
+def _within_service_window(now: datetime | None = None) -> bool:
+    timezone = ZoneInfo(SERVICE_WINDOW_TIME_ZONE)
+    current = now.astimezone(timezone) if now else datetime.now(timezone)
+    start_hour = SERVICE_WINDOW_START_HOUR
+    end_hour = SERVICE_WINDOW_END_HOUR
+    if start_hour == end_hour:
+        return True
+    if start_hour < end_hour:
+        return start_hour <= current.hour < end_hour
+    return current.hour >= start_hour or current.hour < end_hour
+
+
+def _raise_if_outside_service_window() -> None:
+    if _within_service_window():
+        return
+    raise AirflowSkipException(
+        "Databricks sync skipped because the service window is "
+        f"{SERVICE_WINDOW_START_HOUR}:00-{SERVICE_WINDOW_END_HOUR}:00 "
+        f"{SERVICE_WINDOW_TIME_ZONE}."
+    )
 
 
 def _load_secret_environment() -> None:
@@ -76,7 +105,7 @@ def _save_source_state(
     dag_id=DAG_ID,
     description="Backfill and incrementally sync multiple Telegram channels into Databricks SQL.",
     start_date=datetime(2026, 1, 1),
-    schedule=os.getenv("TELEGRAM_AIRFLOW_SCHEDULE", "*/15 * * * *"),
+    schedule=os.getenv("TELEGRAM_AIRFLOW_SCHEDULE", "*/15 1-12 * * *"),
     catchup=False,
     max_active_runs=1,
     default_args={
@@ -89,6 +118,7 @@ def _save_source_state(
 def telegram_to_databricks_live_sync():
     @task
     def sync_messages() -> dict[str, object]:
+        _raise_if_outside_service_window()
         _load_secret_environment()
         sources = telegram_sources_from_env()
         state = _channel_state()

@@ -7,7 +7,7 @@
 
 This guide creates a persistent Apache Airflow installation on one Ubuntu EC2
 instance. Airflow remains online when your computer is off and schedules the
-Telegram-to-Databricks DAG every 15 minutes.
+Telegram-to-Databricks DAG every 15 minutes during the 09:00-21:00 Singapore service window.
 
 The deployment uses:
 
@@ -721,11 +721,16 @@ TELEGRAM_CHANNEL_4_TOPIC_ID=123456
 Use these initial values:
 
 ```text
-TELEGRAM_AIRFLOW_SCHEDULE="*/15 * * * *"
+# Airflow cron is UTC by default; this is 09:00-20:45 Singapore time.
+TELEGRAM_AIRFLOW_SCHEDULE="*/15 1-12 * * *"
+SERVICE_WINDOW_TIME_ZONE=Asia/Singapore
+SERVICE_WINDOW_START_HOUR=9
+SERVICE_WINDOW_END_HOUR=21
 TELEGRAM_BACKFILL_PAGE_LIMIT=0
 TELEGRAM_PER_RUN_LIMIT=0
 ```
 
+- The DAG is scheduled only from 09:00 through 20:45 Singapore time, and the task also skips itself outside 09:00-21:00 if manually triggered.
 - A new source loads all available historical messages in its first run.
 - The successful run saves that source's highest Telegram message ID.
 - After the historical run, the source switches to incremental ingestion.
@@ -891,7 +896,7 @@ In the DAG list:
 2. Confirm the DAG appears.
 3. Keep it paused for the first manual test.
 4. Open **Grid** or **Graph** and confirm the task `sync_messages` appears.
-5. Confirm the schedule is `*/15 * * * *`.
+5. Confirm the schedule is `*/15 1-12 * * *`, which is every 15 minutes from 09:00 through 20:45 Singapore time when Airflow cron is evaluated in UTC.
 
 If `localhost:8080` does not load, check:
 
@@ -1029,15 +1034,15 @@ After the first manual run succeeds:
 5. You may close your browser, close the tunnel, and turn off your computer.
 6. The Airflow scheduler remains active on EC2 through systemd.
 7. Return after 30–45 minutes and reconnect through the SSH tunnel.
-8. Confirm that scheduled runs occurred at 15-minute intervals.
+8. Confirm that scheduled runs occurred at 15-minute intervals during 09:00-21:00 Singapore time.
 
 The default schedule is:
 
 ```text
-*/15 * * * *
+*/15 1-12 * * *
 ```
 
-which runs at minute `00`, `15`, `30`, and `45` of each hour.
+Airflow cron is UTC by default, so this runs at minute `00`, `15`, `30`, and `45` from 01:00 through 12:45 UTC, which is 09:00 through 20:45 Singapore time. The DAG task has a second safety check that skips Databricks work outside 09:00-21:00 Singapore time.
 
 ---
 
@@ -1128,7 +1133,7 @@ AWS CPU-credit capacity must be checked separately in the EC2 CloudWatch
 - [ ] Airflow state Variable contains source progress.
 - [ ] Databricks table has the expected schema and rows.
 - [ ] Duplicate-key query returns no rows.
-- [ ] DAG is unpaused and runs every 15 minutes.
+- [ ] DAG is unpaused and runs every 15 minutes during 09:00-21:00 Singapore time.
 - [ ] Services restart after an EC2 reboot.
 - [ ] Daily metadata backups are active.
 

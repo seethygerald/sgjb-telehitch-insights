@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isWithinServiceWindow, serviceWindowMessage } from "../../../../lib/availability";
 import { fetchLatestRequestTime, fetchRecentRequests, fetchTotalRequestCount, fetchUniqueRequestCount } from "../../../../lib/databricks";
 import { RouteTab } from "../../../../lib/types";
-
-const MAINTENANCE_MESSAGE = "The app is currently undergoing maintenance. Please try again in several hours.";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +23,10 @@ export async function GET(request: NextRequest) {
   const limit = parsePositiveInteger(params.get("limit"), 5000, 5000);
   const tab = parseTab(params.get("tab"));
 
+  if (!isWithinServiceWindow()) {
+    return NextResponse.json({ error: serviceWindowMessage() }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
+  }
+
   try {
     const [requests, totalCount, activeDriverCount, latestPostAt] = await Promise.all([
       fetchRecentRequests(minutes, tab, limit),
@@ -43,6 +46,6 @@ export async function GET(request: NextRequest) {
     }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
     console.error("Recent requests Databricks request failed", error);
-    return NextResponse.json({ error: MAINTENANCE_MESSAGE }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
+    return NextResponse.json({ error: serviceWindowMessage() }, { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } });
   }
 }
